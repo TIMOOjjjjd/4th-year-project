@@ -1,0 +1,53 @@
+• 下面是一套紧凑的“必备知识点 + 学习路径”，覆盖你理解与改造此项目所需的核心技能。
+
+  编程基础
+
+  - Python 基础：数据结构（list/dict/set）、函数与类、异常处理、文件与路径操作、虚拟环境与包管理（pip/venv/conda）。
+  - NumPy/Pandas：张量/数组基础、DataFrame 清洗与聚合、时间序列处理（to_datetime、resample/按小时聚合、缺失值填充）、读写 CSV/Parquet（PyArrow）。
+
+  时序建模
+
+  - 数据预处理：归一化/标准化（MinMaxScaler）、窗口切片（滑动窗口、多尺度序列拼接）、训练/验证切分、缺失时间补齐。
+  - 指标与评估：MAE/MSE/RMSE/MAPE、滚动预测与回测思路。
+  - 可解释要点：多尺度特征如何缓解日/周/月周期与趋势的叠加。
+
+  PyTorch 基础
+
+  - 张量与设备：tensor 类型、cuda/CPU 切换、随机种子与可复现性。
+  - 模型搭建：nn.Module、前向传播、损失函数（MSELoss）、优化器（Adam）、训练/验证循环、保存/加载权重。
+  - 序列模型：RNN/LSTM/GRU 的输入输出维度与隐藏状态；Transformer 编码器基本概念（多头注意力、维度要求、mask/permute）。
+  - 性能与调试：batch size/梯度爆炸与裁剪、学习率设置、过拟合与正则。
+
+  图与图学习（用到的深度）
+
+  - 图概念：邻接矩阵/边列表、加权边、稀疏表示（edge_index、edge_attr）。
+  - PyTorch Geometric 入门：数据表示、dense_to_sparse、基本算子；理解图用于“邻域搜索/传播”的意义。
+  - 图算法实用：BFS/DFS、最短路径、基于图的邻域筛选与扩散逻辑（项目中用于邻区调度建议）。
+
+  可视化与地理数据
+
+  - GeoJSON/区域多边形：按属性（Zone 名称）联结数据并着色。
+  - Folium/Branca：底图、GeoJson 图层、颜色映射（LinearColormap）、tooltip。
+  - 地理一致性：Zone 名称/ID 映射、数据对齐与缺失处理。
+
+  桌面 GUI
+
+  - PyQt5/PyQtWebEngine：窗口、布局、输入框/按钮/文本框、信号槽；在 GUI 中嵌入本地 HTML 地图。
+  - 交互逻辑：从输入 Zone ID 做校验、查询预测/真值、执行邻区搜索与输出建议。
+
+  工程与环境
+
+  - 项目结构与数据流：从原始数据→特征→模型预测→CSV→地图/GUI 的端到端管线。
+  - 环境问题：CUDA/CuDNN、PyTorch Geometric 平台安装要点、Windows 下依赖安装与编译常见坑。
+  - 日志与可视化：训练日志、曲线（matplotlib）、结果落盘与版本化。
+
+  建议的学习顺序（实操驱动）
+
+  - 第1步：Python + Pandas/NumPy（能把小时级序列切片出多尺度窗口）。
+  - 第2步：PyTorch（先做单尺度 GRU，再接 LSTM/Transformer 融合）。
+  - 第3步：Folium + GeoJSON（把CSV预测渲染成热力图）。
+  - 第4步：PyTorch Geometric + 图算法（能读邻接矩阵、做 BFS 邻域推荐）。
+  - 第5步：PyQt5（把地图嵌到 GUI，打通输入→推荐链路）。
+  - 第6步：评估与优化（指标、调参、效率与稳定性）。
+
+  如果你愿意，我可以基于现有代码给你出一份“逐周学习清单”和对应的小练习，或者先把 demo.py 补齐为可训练与导出预测的完整脚本，便于你边学边跑。你更倾向哪种？
