@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-from torch import nn
 
 # 检查 GPU 是否可用
-device = torch.device( "cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device( "cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
+
 print("CUDA available:", torch.cuda.is_available())
 print("Using device:", device)
 
@@ -17,6 +18,65 @@ target_date = pd.Timestamp('2021-03-05 12:00')  # 目标时间点
 
 
 
+
+import torch
+import torch.nn as nn
+
+class MultiScaleModel(nn.Module):
+    def __init__(self, hidden_size):
+        super(MultiScaleModel, self).__init__()
+
+        self.hidden_size = hidden_size
+
+        # Define LSTM (for daily & weekly patterns)
+        self.lstm_1d = nn.LSTM(1, hidden_size, batch_first=True)
+        self.lstm_1w = nn.LSTM(1, hidden_size, batch_first=True)
+
+        # Define Transformer (for monthly trends)
+        self.input_projection = nn.Linear(1, hidden_size)  # Projects input to match hidden size
+        self.transformer_1m = nn.Transformer(hidden_size, nhead=4, num_encoder_layers=2, batch_first=True)
+
+        # Feature fusion layer (Combining LSTM + Transformer outputs)
+        self.feature_fusion = nn.Linear(hidden_size * 3, hidden_size)
+
+        # Final GRU (now receives raw 1-hour sequence + fused long-term trends)
+        self.gru = nn.GRU(hidden_size + 1, hidden_size, batch_first=True)
+
+        # Final prediction layer (Forecasts next hour demand)
+        self.fc = nn.Linear(hidden_size, 1)
+
+    def forward(self, x):
+        # Extract different time-scale features
+        x_1h, x_1d, x_1w, x_1m = x["1h"], x["1d"], x["1w"], x["1m"]
+
+        # Process 1-day & 1-week data with LSTMs
+        _, (h_1d, _) = self.lstm_1d(x_1d)
+        h_1d = h_1d[-1]  # Take the last hidden state
+
+        _, (h_1w, _) = self.lstm_1w(x_1w)
+        h_1w = h_1w[-1]  # Take the last hidden state
+
+        # Process 1-month data with Transformer
+        x_1m = self.input_projection(x_1m)
+        x_1m = x_1m.permute(1, 0, 2)  # Adjust dimensions for Transformer
+        h_1m = self.transformer_1m(x_1m, x_1m)[-1]
+
+        # Fuse LSTM and Transformer outputs
+        fused_trend = torch.cat([h_1d, h_1w, h_1m], dim=1)
+        fused_trend = self.feature_fusion(fused_trend)  # Reduce dimensionality to hidden_size
+
+        # Prepare GRU input (1-hour data + fused long-term trend)
+        batch_size, seq_len, _ = x_1h.shape
+        fused_trend_expanded = fused_trend.unsqueeze(1).repeat(1, seq_len, 1)  # Expand to match sequence length
+        x_gru_input = torch.cat([x_1h, fused_trend_expanded], dim=2)  # [batch, seq_len, hidden_size + 1]
+
+        # Process with GRU
+        _, h_gru = self.gru(x_gru_input)
+        h_gru = h_gru[-1]  # Take last hidden state
+
+        # Final Prediction
+        output = self.fc(h_gru)
+        return output
 
 
 # month = '01'
@@ -39,6 +99,27 @@ df_temp['datetime'] = df_temp['pickup_datetime'].dt.floor('H')
 df = df_temp
 
 
+# durations = {
+#     '1h': 1,
+#     '1d': 24,
+#     '1w': 24 * 7,
+#     '1m': 24 * 30
+# }
+# forecast_length = 1
+#
+# sequence_length = durations['1m']
+# sf = sequence_length + forecast_length
+#
+#
+# global_predictions = []
+# global_true_values = []
+#
+#
+# start_date = target_date - pd.Timedelta(hours=sequence_length)
+#
+# # 过滤指定时间范围的数据（不包括 target_date）
+# df = df[(df['datetime'] >= start_date) & (df['datetime'] <= target_date)]
+
 durations = {
     '1h': 1,
     '1d': 24,
@@ -46,19 +127,21 @@ durations = {
     '1m': 24 * 30
 }
 forecast_length = 1
-
 sequence_length = durations['1m']
 sf = sequence_length + forecast_length
-
 
 global_predictions = []
 global_true_values = []
 
+# 目标：输入区间为 [2021-02-03 11:00, 2021-03-05 11:00]
+# 原来是 target_date - 720h 得到 2021-02-03 12:00，现在往前多挪 1 小时
+start_date = target_date - pd.Timedelta(hours=sequence_length + 1)
+print(start_date)  # 将打印 2021-02-03 11:00:00
 
-start_date = target_date - pd.Timedelta(hours=sequence_length)
+# 过滤指定时间范围（仍然不包含 target_date=2021-03-05 12:00）
+# 这样就会包含到 2021-03-05 11:00 为止
+df = df[(df['datetime'] >= start_date) & (df['datetime'] < target_date)]
 
-# 过滤指定时间范围的数据（不包括 target_date）
-df = df[(df['datetime'] >= start_date) & (df['datetime'] <= target_date)]
 
 skipZoneList = []
 # 初始化结果列表
@@ -87,30 +170,35 @@ for zoneid in unique_zones:
 
 
     # 数据归一化
+
+    # max_day = hourly_demand['datetime'].max().day
     scaler = MinMaxScaler()
     hourly_demand['passenger_count_scaled'] = scaler.fit_transform(hourly_demand[['passenger_count']])
 
-    # max_day = hourly_demand['datetime'].max().day
-
-
+    print(len(hourly_demand))
 
     if len(hourly_demand) < sf/2:
         print("missing critical data!")
         skipZoneList.append(zoneid)
         continue
-    if target_date not in hourly_demand['datetime'].values:
-        print(f"Target date {target_date} not found for PULocationID {zoneid}. Adding missing target date...")
-        missing_row = pd.DataFrame({'datetime': [target_date], 'passenger_count': [0]})
-        hourly_demand = pd.concat([hourly_demand, missing_row], ignore_index=True).sort_values('datetime').reset_index(
-            drop=True)
+    # if target_date not in hourly_demand['datetime'].values:
+    #     missing_row = pd.DataFrame({'datetime': [target_date], 'passenger_count': [0]})
+    #     hourly_demand = (
+    #         pd.concat([hourly_demand, missing_row], ignore_index=True)
+    #         .sort_values('datetime')
+    #         .reset_index(drop=True)
+    #     )
     print(f"Length of hourly_demand: {len(hourly_demand)}")
     print(f"Required sf: {sf}")
     if len(hourly_demand) < sf:
-        print(f"Insufficient data for PULocationID {zoneid}, filling missing data.")
-        # 计算需要的总长度
-        required_length = sf
-        current_length = len(hourly_demand)
-        missing_length = required_length - current_length
+        full_datetime_range = pd.date_range(start=minGlobalDate, end=target_date, freq='H')
+        hourly_demand = (
+            hourly_demand.set_index('datetime')
+            .reindex(full_datetime_range)
+            .fillna(0)
+            .reset_index()
+            .rename(columns={'index': 'datetime'})
+        )
 
 
 
@@ -202,72 +290,9 @@ for zoneid in unique_zones:
     print(f"X_1m_tensor shape: {X_1m_tensor.shape}")  # (batch, sequence_length, 1)
     print(f"y_tensor shape: {y_tensor.shape}")  # (batch, forecast_length)
 
-    # 模型定义
-    import torch
-    from torch import nn
-
-    import torch
-    from torch import nn
-
-    import torch
-    import torch.nn as nn
 
 
-    class MultiScaleModel(nn.Module):
-        def __init__(self, hidden_size):
-            super(MultiScaleModel, self).__init__()
 
-            self.hidden_size = hidden_size
-
-            # Define LSTM (for daily & weekly patterns)
-            self.lstm_1d = nn.LSTM(1, hidden_size, batch_first=True)
-            self.lstm_1w = nn.LSTM(1, hidden_size, batch_first=True)
-
-            # Define Transformer (for monthly trends)
-            self.input_projection = nn.Linear(1, hidden_size)  # Projects input to match hidden size
-            self.transformer_1m = nn.Transformer(hidden_size, nhead=4, num_encoder_layers=2, batch_first=True)
-
-            # Feature fusion layer (Combining LSTM + Transformer outputs)
-            self.feature_fusion = nn.Linear(hidden_size * 3, hidden_size)
-
-            # Final GRU (now receives raw 1-hour sequence + fused long-term trends)
-            self.gru = nn.GRU(hidden_size + 1, hidden_size, batch_first=True)
-
-            # Final prediction layer (Forecasts next hour demand)
-            self.fc = nn.Linear(hidden_size, 1)
-
-        def forward(self, x):
-            # Extract different time-scale features
-            x_1h, x_1d, x_1w, x_1m = x["1h"], x["1d"], x["1w"], x["1m"]
-
-            # Process 1-day & 1-week data with LSTMs
-            _, (h_1d, _) = self.lstm_1d(x_1d)
-            h_1d = h_1d[-1]  # Take the last hidden state
-
-            _, (h_1w, _) = self.lstm_1w(x_1w)
-            h_1w = h_1w[-1]  # Take the last hidden state
-
-            # Process 1-month data with Transformer
-            x_1m = self.input_projection(x_1m)
-            x_1m = x_1m.permute(1, 0, 2)  # Adjust dimensions for Transformer
-            h_1m = self.transformer_1m(x_1m, x_1m)[-1]
-
-            # Fuse LSTM and Transformer outputs
-            fused_trend = torch.cat([h_1d, h_1w, h_1m], dim=1)
-            fused_trend = self.feature_fusion(fused_trend)  # Reduce dimensionality to hidden_size
-
-            # Prepare GRU input (1-hour data + fused long-term trend)
-            batch_size, seq_len, _ = x_1h.shape
-            fused_trend_expanded = fused_trend.unsqueeze(1).repeat(1, seq_len, 1)  # Expand to match sequence length
-            x_gru_input = torch.cat([x_1h, fused_trend_expanded], dim=2)  # [batch, seq_len, hidden_size + 1]
-
-            # Process with GRU
-            _, h_gru = self.gru(x_gru_input)
-            h_gru = h_gru[-1]  # Take last hidden state
-
-            # Final Prediction
-            output = self.fc(h_gru)
-            return output
 
 
     # 模型定义
@@ -603,7 +628,6 @@ class MultiScaleGraphSAGE(nn.Module):
         x2 = self.dropout(F.gelu(self.sage2(x1, edge_index)))
         return self.out_linear(x2).squeeze(-1)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # 训练模型
 model = MultiScaleGraphSAGE(in_dim=2, hidden_dim=hd).to(device)
