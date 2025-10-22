@@ -172,8 +172,8 @@ for zoneid in unique_zones:
     # 数据归一化
 
     # max_day = hourly_demand['datetime'].max().day
-    scaler = MinMaxScaler()
-    hourly_demand['passenger_count_scaled'] = scaler.fit_transform(hourly_demand[['passenger_count']])
+    # scaler = MinMaxScaler()
+    # hourly_demand['passenger_count_scaled'] = scaler.fit_transform(hourly_demand[['passenger_count']])
 
     print(len(hourly_demand))
 
@@ -236,7 +236,16 @@ for zoneid in unique_zones:
         print(f"hourly_demand columns after fill: {hourly_demand.shape}")
 
         # 确保归一化列存在
-        hourly_demand['passenger_count_scaled'] = scaler.fit_transform(hourly_demand[['passenger_count']])
+        # hourly_demand['passenger_count_scaled'] = scaler.fit_transform(hourly_demand[['passenger_count']])
+    scaler = MinMaxScaler()
+    hist_mask = hourly_demand['datetime'] < target_date
+    scaler.fit(hourly_demand.loc[hist_mask, ['passenger_count']])
+
+    # 对整列做 transform（target_date 这一行只 transform，不参与 fit）
+    hourly_demand['passenger_count_scaled'] = scaler.transform(
+        hourly_demand[['passenger_count']]
+    )
+
 
     X_1h, X_1d, X_1w, X_1m, y = [], [], [], [], []
 
