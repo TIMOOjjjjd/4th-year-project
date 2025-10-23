@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Model checkpoints
+checkpoints_multiscale/
+checkpoints_*/
+
+# Data files
+*.parquet
+*.csv
+
+
+
