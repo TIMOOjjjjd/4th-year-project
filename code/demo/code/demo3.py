@@ -9,7 +9,7 @@ from persistent_multiscale import MultiScaleModelManager
 # --------------------------
 # Smoke-test configuration
 # --------------------------
-K_ZONES = 10          # 只跑最活跃的前 K 个区域
+K_ZONES = 5          # 只跑最活跃的前 K 个区域
 N_LABELS = 168        # 总共评估的标签时刻（小时数）
 N_VAL = 24            # 最后 N_VAL 个小时做验证
 HISTORY_NEEDED = 720 # 管理器构建样本所需历史窗口（小时）
@@ -24,7 +24,7 @@ def build_label_times(target_date: pd.Timestamp, n_labels: int) -> list[pd.Times
 
 
 def main():
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("CUDA available:", torch.cuda.is_available())
     print("Using device:", device)
 

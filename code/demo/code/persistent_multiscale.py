@@ -10,8 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 
 # Device selection
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class MultiScaleModel(nn.Module):
