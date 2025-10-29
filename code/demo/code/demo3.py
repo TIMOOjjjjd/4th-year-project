@@ -4,6 +4,7 @@ import torch
 from pathlib import Path
 
 from persistent_multiscale import MultiScaleModelManager
+# from persistent_lstm import PureLSTMModelManager as MultiScaleModelManager
 
 
 # --------------------------
