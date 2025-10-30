@@ -2,9 +2,23 @@ import pandas as pd
 import numpy as np
 import torch
 from pathlib import Path
-
-from persistent_multiscale import MultiScaleModelManager
+import os
+# from persistent_multiscale import MultiScaleModelManager
 # from persistent_lstm import PureLSTMModelManager as MultiScaleModelManager
+from multiscale_confidence import MultiScaleModelManager
+
+
+
+# === 临时调试：启动时自动清理旧 checkpoint 目录 ===
+import shutil
+for f in os.listdir('.'):
+    if f.startswith("checkpoints_") and os.path.isdir(f):
+        try:
+            shutil.rmtree(f)
+            print(f"[debug] deleted old checkpoint directory: {f}")
+        except Exception as e:
+            print(f"[debug] failed to delete {f}: {e}")
+# === 结束 ===
 
 
 # --------------------------
