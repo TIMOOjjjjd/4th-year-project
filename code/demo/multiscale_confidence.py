@@ -157,7 +157,7 @@ class MultiScaleModelManager:
 
     def __init__(self,
                  checkpoint_dir: str = "checkpoints_multiscale",
-                 hidden_size: int = 64,
+                 hidden_size: int = 128,
                  p_drop: float = 0.2,
                  lambda_aux: float = 0.5,
                  K_mc_train: int = 5,
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train-once and predict with MultiScaleModel per zone.")
     parser.add_argument("--data", type=str, default="data.parquet", help="Input parquet file path.")
     parser.add_argument("--target", type=str, default="2021-03-05 12:00", help="Target timestamp (YYYY-mm-dd HH:MM)")
-    parser.add_argument("--hidden", type=int, default=64, help="Hidden size.")
+    parser.add_argument("--hidden", type=int, default=128, help="Hidden size.")
     parser.add_argument("--checkpoints", type=str, default="checkpoints_multiscale", help="Checkpoint directory.")
     parser.add_argument("--zones", type=int, nargs="*", default=None, help="Optional list of PULocationID to process.")
     parser.add_argument("--no-auto-train", action="store_true", help="Disable auto-train when checkpoint missing.")

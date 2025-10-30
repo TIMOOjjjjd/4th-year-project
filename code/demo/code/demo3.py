@@ -5,8 +5,8 @@ from pathlib import Path
 import os
 # from persistent_multiscale import MultiScaleModelManager
 # from persistent_lstm import PureLSTMModelManager as MultiScaleModelManager
-from multiscale_confidence import MultiScaleModelManager
-
+# from multiscale_confidence import MultiScaleModelManager
+from V2_manager import V2Manager as MultiScaleModelManager
 
 
 # === 临时调试：启动时自动清理旧 checkpoint 目录 ===

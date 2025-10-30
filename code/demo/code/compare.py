@@ -6,8 +6,8 @@ import os
 
 from multiscale_confidence import MultiScaleModelManager
 # from persistent_multiscale import MultiScaleModelManager
-from persistent_lstm import PureLSTMModelManager
-
+# from persistent_lstm import PureLSTMModelManager
+from persistent_transformer import PureTransformerModelManager as PureLSTMModelManager
 
 # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
 import shutil
