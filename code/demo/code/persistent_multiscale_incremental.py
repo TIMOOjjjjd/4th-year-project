@@ -1,10 +1,11 @@
 # persistent_multiscale_incremental.py
 # 完整版：带“第一次完整训练 + 后续小时增量训练”的 MultiScaleModelManager
 # 以及一个可在 IDE 里直接运行的 main() 演示（滚动 k 小时）
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+
 
 from __future__ import annotations
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import json
 from pathlib import Path
 from dataclasses import dataclass
@@ -200,14 +201,26 @@ class MultiScaleModelManager:
         return hourly
 
 
+
     def _fit_scaler_hist(self, hourly: pd.DataFrame, fit_until_exclusive: pd.Timestamp) -> MinMaxScaler:
-        """只用 < fit_until_exclusive 的历史拟合 scaler，避免未来泄漏"""
+        """只用 < fit_until_exclusive 的历史拟合 scaler，避免未来泄露；含健壮性处理。"""
         scaler = MinMaxScaler()
         hist = hourly[hourly['datetime'] < fit_until_exclusive]
-        if hist.empty:
-            # 若历史为空，退化为全量（避免报错）；实际场景可自定义
-            hist = hourly
-        scaler.fit(hist[['passenger_count']])
+        values = hist[['passenger_count']].astype(float)
+
+        if values.empty:
+            scaler.fit(pd.DataFrame({'passenger_count': [0.0]}))
+            return scaler
+
+        vmin = float(values['passenger_count'].min())
+        vmax = float(values['passenger_count'].max())
+
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
+            base = 0.0 if not np.isfinite(vmin) else vmin
+            scaler.fit(pd.DataFrame({'passenger_count': [base, base + 1.0]}))
+            return scaler
+
+        scaler.fit(values)
         return scaler
 
     def _build_training_windows(self, hourly: pd.DataFrame, scaler: MinMaxScaler | None = None):
@@ -332,100 +345,102 @@ class MultiScaleModelManager:
         self._save(zone_id, model, scaler)
         self._save_meta(zone_id, target_date)
 
-    def incremental_update(self, df, zone_id, prev_until, new_until,
-                           epochs: int = 1, lr: float = 2e-4):
+    def incremental_update(
+            self,
+            df: pd.DataFrame,
+            zone_id: int,
+            prev_until: pd.Timestamp,
+            new_until: pd.Timestamp,
+            epochs: Optional[int] = None,
+            lr: Optional[float] = None,
+    ) -> None:
         """
-        低显存版：逐小时流式微调。
-        对于每个 s∈(prev_until, new_until]：
-          输入 = [s-720, s-1] 的多尺度窗口；标签 = s。
-        一次只构建并训练一个样本，立刻释放中间张量，避免大 batch 堆积到 GPU。
+        用 (prev_until, new_until] 的每个标签小时 s 做微调。
+        对于每个 s：输入窗口 = [s-720, s-1]，标签 = s。
+        在每次微调前，按 new_until 之前的历史重新拟合 scaler，并在训练后保存更新后的 scaler。
         """
+        # 零步保护
         if new_until <= prev_until:
             return
 
-        # 1) 载入模型与 scaler
-        model, scaler = self._load(zone_id)
+        epochs = epochs if epochs is not None else self.cfg.epochs_incremental
+        lr = lr if lr is not None else self.cfg.lr_incremental
+
+        # 载入模型；scaler 不沿用旧的，按 new_until 重拟合
+        model, _old_scaler = self._load(zone_id)
         model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-        criterion = torch.nn.SmoothL1Loss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=self.cfg.weight_decay)
+        criterion = nn.SmoothL1Loss()
 
-        # 可选：混合精度（大幅降显存占用）
-        use_amp = torch.cuda.is_available()
-        scaler_amp = torch.cuda.amp.GradScaler(enabled=use_amp)
-
-        # 2) 准备完整序列（覆盖到 new_until），仅 transform，避免泄漏
-        hourly = self._prepare_zone_series(df, zone_id, new_until)
+        # 准备覆盖到 new_until 的完整序列；这里仅 transform，不再 fit
+        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=new_until)
+        # 关键：每次微调前用 < new_until 的历史重拟合 scaler（可改为 14/30 天窗口，你已有思路）
+        fit_start = new_until - pd.Timedelta(days=30)
+        hourly_fit = hourly[(hourly['datetime'] < new_until) & (hourly['datetime'] >= fit_start)].copy()
+        scaler = self._fit_scaler_hist(hourly_fit, fit_until_exclusive=new_until)
         hourly['passenger_count_scaled'] = scaler.transform(hourly[['passenger_count']])
-        series = hourly['passenger_count_scaled']
+
         idx = {t: i for i, t in enumerate(hourly['datetime'])}
 
+        s_list = pd.date_range(start=prev_until + pd.Timedelta(hours=1), end=new_until, freq="H")
         dur = self.durations
         L = self.cfg.sequence_length
-        flen = self.cfg.forecast_length
+        series = hourly['passenger_count_scaled']
 
-        # 3) 逐小时流式微调：几乎恒定显存
-        s_list = pd.date_range(prev_until + pd.Timedelta(hours=1), new_until, freq='h')
+        X_1h, X_1d, X_1w, X_1m, Y = [], [], [], [], []
+        for s in s_list:
+            end_i = idx.get(s, None)
+            if end_i is None:
+                continue
+            start_i = end_i - L
+            if start_i < 0:
+                continue
+            if end_i + self.cfg.forecast_length > len(series):
+                continue
 
-        for ep in range(max(1, epochs)):
-            for s in s_list:
-                end_i = idx.get(s, None)
-                if end_i is None:
-                    continue
-                start_i = end_i - L
-                if start_i < 0 or end_i + flen > len(series):
-                    continue
+            X_1h.append(series.iloc[end_i - dur['1h']: end_i].values)
+            X_1d.append(series.iloc[end_i - dur['1d']: end_i].values)
+            X_1w.append(series.iloc[end_i - dur['1w']: end_i].values)
+            X_1m.append(series.iloc[start_i: end_i].values)
+            Y.append(series.iloc[end_i: end_i + self.cfg.forecast_length].values)
 
-                # —— 单样本窗口（numpy → float32）——
-                x_1h = np.asarray(series.iloc[end_i - dur['1h']: end_i].values, dtype=np.float32)
-                x_1d = np.asarray(series.iloc[end_i - dur['1d']: end_i].values, dtype=np.float32)
-                x_1w = np.asarray(series.iloc[end_i - dur['1w']: end_i].values, dtype=np.float32)
-                x_1m = np.asarray(series.iloc[start_i: end_i].values, dtype=np.float32)
-                y = np.asarray(series.iloc[end_i: end_i + flen].values, dtype=np.float32)
+        if not X_1m:  # 没有新增样本（如数据缺失）
+            self._save(zone_id, model, scaler)
+            self._save_meta(zone_id, prev_until)
+            return
 
-                # —— 构造 1 样本的字典张量（直接到 GPU）——
-                X = {
-                    '1h': torch.from_numpy(x_1h).to(device).view(1, -1, 1),
-                    '1d': torch.from_numpy(x_1d).to(device).view(1, -1, 1),
-                    '1w': torch.from_numpy(x_1w).to(device).view(1, -1, 1),
-                    '1m': torch.from_numpy(x_1m).to(device).view(1, -1, 1),
-                }
-                Y = torch.from_numpy(y).to(device).view(1, -1)
+        X = {
+            '1h': torch.tensor(np.array(X_1h), dtype=torch.float32, device=device).unsqueeze(-1),
+            '1d': torch.tensor(np.array(X_1d), dtype=torch.float32, device=device).unsqueeze(-1),
+            '1w': torch.tensor(np.array(X_1w), dtype=torch.float32, device=device).unsqueeze(-1),
+            '1m': torch.tensor(np.array(X_1m), dtype=torch.float32, device=device).unsqueeze(-1),
+        }
+        Y = torch.tensor(np.array(Y), dtype=torch.float32, device=device)
 
-                optimizer.zero_grad(set_to_none=True)
-                if use_amp:
-                    # with torch.cuda.amp.autocast():
-                    with torch.amp.autocast('cuda', ):
-                        pred = model(X)
-                        loss = criterion(pred, Y)
-                    scaler_amp.scale(loss).backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
-                    scaler_amp.step(optimizer)
-                    scaler_amp.update()
-                else:
-                    pred = model(X)
-                    loss = criterion(pred, Y)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
-                    optimizer.step()
+        for _ in range(max(1, epochs)):
+            optimizer.zero_grad()
+            pred = model(X)
+            loss = criterion(pred, Y)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
+            optimizer.step()
 
-                # —— 及时释放（避免累计）——
-                del X, Y, pred, loss
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            # 注意：第二个 epoch 开始时，s_list 会复用；如需严格“只新增一次”，epochs 设 1 即可。
-
-        # 4) 保存微调后的权重 & 更新 meta
+        # 保存微调后权重 + 更新后的 scaler + meta
         self._save(zone_id, model, scaler)
         self._save_meta(zone_id, new_until)
 
-
     def predict(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> float:
-        """用保存的模型对 target_date 小时做预测（输入为 [target-720, target-1]）"""
+        """
+        用保存的模型对 target_date 小时做预测（输入为 [target-720, target-1]）。
+        预测前按 target_date 之前的历史重拟合 scaler，不使用旧的 scaler。
+        """
         if not self.has_checkpoint(zone_id):
             raise FileNotFoundError(f"Zone {zone_id} 没有 checkpoint，请先训练")
 
-        model, scaler = self._load(zone_id)
+        model, _old_scaler = self._load(zone_id)  # 只用模型，scaler 重新拟合
         hourly = self._prepare_zone_series(df, zone_id, end_inclusive=target_date)
+        scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
+
         X_last = self._build_inference_window(hourly, scaler, target_date)
 
         model.eval()
