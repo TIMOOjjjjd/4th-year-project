@@ -29,7 +29,7 @@ LOOKUP_PATH = "taxi-zone-lookup.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
 START_TARGET = pd.Timestamp("2021-03-06 12:00")  # 第721小时
-ROLLING_STEPS = 3                               # 连续预测24小时
+ROLLING_STEPS = 15                               # 连续预测24小时
 HIDDEN_SIZE = 64                                 # 模型隐藏层大小
 # EXCLUDED_ZONES = [1,2,3,   103, 104, 105, 46, 264, 265]   # 排除的区域
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]   # 排除的区域
