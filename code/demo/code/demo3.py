@@ -11,6 +11,7 @@ from V2_manager import V2Manager as MultiScaleModelManager
 
 # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
 import shutil
+import os
 for f in os.listdir('.'):
     if f.startswith("checkpoints_") and os.path.isdir(f):
         try:
