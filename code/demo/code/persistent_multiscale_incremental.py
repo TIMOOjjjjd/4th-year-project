@@ -1,6 +1,8 @@
 # persistent_multiscale_incremental.py
 # 完整版：带“第一次完整训练 + 后续小时增量训练”的 MultiScaleModelManager
 # 以及一个可在 IDE 里直接运行的 main() 演示（滚动 k 小时）
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from __future__ import annotations
 import json
@@ -94,7 +96,8 @@ class ManagerConfig:
     grad_clip: float = 2.0
     sequence_length: int = 24 * 30  # 720h
     forecast_length: int = 1
-
+    learning_rate = 0.001
+    patience = 5
 
 class MultiScaleModelManager:
     """
@@ -150,23 +153,52 @@ class MultiScaleModelManager:
         return pd.Timestamp(meta["last_trained_until"])
 
     # ---------- 数据准备 ----------
+        hourly['passenger_count'] = hourly['passenger_count'].astype(float)
+        return hourly  # 列: datetime, passenger_count
+    # def _prepare_zone_series(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> pd.DataFrame:
+    #     """Return full hourly series for the zone from (target_date - 1m) to (target_date - 1h)."""
+    #     assert 'datetime' in df.columns and 'PULocationID' in df.columns
+    #
+    #     # Time window
+    #     start_date = target_date - pd.Timedelta(hours=self.sequence_length)
+    #
+    #     zone_df = df[df['PULocationID'] == zone_id].copy()
+    #     hourly = zone_df.groupby('datetime').size().reset_index(name='passenger_count')
+    #
+    #     # Restrict to needed range and fill missing hours with zeros
+    #     rng = pd.date_range(start=start_date, end=target_date, freq='H')
+    #     hourly = (
+    #         hourly.set_index('datetime')
+    #         .reindex(rng)
+    #         .fillna(0)
+    #         .rename_axis('datetime')
+    #         .reset_index()
+    #     )
+    #     hourly['passenger_count'] = hourly['passenger_count'].astype(float)
+    #     return hourly
+
     def _prepare_zone_series(self, df: pd.DataFrame, zone_id: int, end_inclusive: pd.Timestamp) -> pd.DataFrame:
-        """返回该区从最早有数据到 end_inclusive 的完整逐小时序列（缺失补 0）"""
-        assert {'datetime', 'PULocationID'}.issubset(df.columns)
+        """Return full hourly series for the zone from (end_inclusive - sequence_length) to end_inclusive."""
+        assert 'datetime' in df.columns and 'PULocationID' in df.columns
+
+        # Time window
+        start_date = end_inclusive - pd.Timedelta(hours=self.cfg.sequence_length)
+
         zone_df = df[df['PULocationID'] == zone_id].copy()
         hourly = zone_df.groupby('datetime').size().reset_index(name='passenger_count')
 
-        rng = pd.date_range(start=hourly['datetime'].min(), end=end_inclusive, freq='H') \
-              if not hourly.empty else pd.date_range(end=end_inclusive, periods=self.cfg.sequence_length + 1, freq='H')
+        # Restrict to needed range and fill missing hours with zeros
+        rng = pd.date_range(start=start_date, end=end_inclusive, freq='h')
         hourly = (
             hourly.set_index('datetime')
-                  .reindex(rng)
-                  .fillna(0.0)
-                  .rename_axis('datetime')
-                  .reset_index()
+            .reindex(rng)
+            .fillna(0)
+            .rename_axis('datetime')
+            .reset_index()
         )
-        hourly['passenger_count'] = hourly['passenger_count'].astype(float)
-        return hourly  # 列: datetime, passenger_count
+        hourly['passenger_count'] = hourly['passenger_count'].astype(float).fillna(0.0)
+        return hourly
+
 
     def _fit_scaler_hist(self, hourly: pd.DataFrame, fit_until_exclusive: pd.Timestamp) -> MinMaxScaler:
         """只用 < fit_until_exclusive 的历史拟合 scaler，避免未来泄漏"""
@@ -178,35 +210,50 @@ class MultiScaleModelManager:
         scaler.fit(hist[['passenger_count']])
         return scaler
 
-    def _build_windows(self, series_scaled: pd.Series) -> Tuple[dict, torch.Tensor]:
-        """从一段连续的缩放后序列构造多样本滑窗（最后一步为标签）"""
-        L = self.cfg.sequence_length
+    def _build_training_windows(self, hourly: pd.DataFrame, scaler: MinMaxScaler | None = None):
+        """Build sliding windows for training; returns tensors X_dict, y_tensor, scaler."""
+        seq_len = self.cfg.sequence_length
         flen = self.cfg.forecast_length
-        dur = self.durations
+        durations = self.durations
 
-        X_1h, X_1d, X_1w, X_1m, Y = [], [], [], [], []
-        n = len(series_scaled)
-        for i in range(n + 1 - L - flen):
-            x_1h = series_scaled.iloc[i + L - dur['1h']: i + L].values
-            x_1d = series_scaled.iloc[i + L - dur['1d']: i + L].values
-            x_1w = series_scaled.iloc[i + L - dur['1w']: i + L].values
-            x_1m = series_scaled.iloc[i: i + L].values
-            y = series_scaled.iloc[i + L: i + L + flen].values  # flen=1
+        # Fit or reuse scaler (fit on entire history here like in demo path before target)
+        if scaler is None:
+            scaler = MinMaxScaler()
+            scaler.fit(hourly[['passenger_count']])
+
+        hourly['passenger_count_scaled'] = scaler.transform(hourly[['passenger_count']])
+
+        X_1h, X_1d, X_1w, X_1m, y = [], [], [], [], []
+        # We need at least seq_len + flen samples to build one example
+        for i in range(len(hourly) + 1 - seq_len - flen):
+            x_1h = hourly['passenger_count_scaled'].iloc[i + seq_len - durations['1h']: i + seq_len].values
+            x_1d = hourly['passenger_count_scaled'].iloc[i + seq_len - durations['1d']: i + seq_len].values
+            x_1w = hourly['passenger_count_scaled'].iloc[i + seq_len - durations['1w']: i + seq_len].values
+            x_1m = hourly['passenger_count_scaled'].iloc[i: i + seq_len].values
 
             X_1h.append(x_1h)
             X_1d.append(x_1d)
             X_1w.append(x_1w)
             X_1m.append(x_1m)
-            Y.append(y)
 
-        X = {
-            '1h': torch.tensor(np.array(X_1h), dtype=torch.float32).unsqueeze(-1).to(device),
-            '1d': torch.tensor(np.array(X_1d), dtype=torch.float32).unsqueeze(-1).to(device),
-            '1w': torch.tensor(np.array(X_1w), dtype=torch.float32).unsqueeze(-1).to(device),
-            '1m': torch.tensor(np.array(X_1m), dtype=torch.float32).unsqueeze(-1).to(device),
+            y_val = hourly['passenger_count_scaled'].iloc[i + seq_len: i + seq_len + flen].values
+            if len(y_val) == flen:
+                y.append(y_val)
+
+        X_1h = np.array(X_1h, dtype=np.float32)
+        X_1d = np.array(X_1d, dtype=np.float32)
+        X_1w = np.array(X_1w, dtype=np.float32)
+        X_1m = np.array(X_1m, dtype=np.float32)
+        y = np.array(y, dtype=np.float32)
+
+        X_tensor = {
+            '1h': torch.tensor(X_1h, dtype=torch.float32).unsqueeze(-1).to(device),
+            '1d': torch.tensor(X_1d, dtype=torch.float32).unsqueeze(-1).to(device),
+            '1w': torch.tensor(X_1w, dtype=torch.float32).unsqueeze(-1).to(device),
+            '1m': torch.tensor(X_1m, dtype=torch.float32).unsqueeze(-1).to(device),
         }
-        Y = torch.tensor(np.array(Y), dtype=torch.float32).to(device)
-        return X, Y
+        y_tensor = torch.tensor(y, dtype=torch.float32).to(device)
+        return X_tensor, y_tensor, scaler
 
     def _build_inference_window(self, hourly: pd.DataFrame, scaler: MinMaxScaler, target_date: pd.Timestamp) -> dict:
         """
@@ -242,120 +289,135 @@ class MultiScaleModelManager:
         }
         return X
 
+
     # ---------- 训练/预测 ----------
     def train_once(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> None:
-        """第一次：用所有 < target 的历史构造多样本滑窗，完整训练，然后把 meta 记到 target-1h"""
-        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=target_date)
-        scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
+        """Train and save model+scaler for a zone if no checkpoint exists."""
+        if self.has_checkpoint(zone_id):
+            return
 
-        # 仅用 < target 的数据构窗（最后标签 ≤ target-1h）
-        hourly_hist = hourly[hourly['datetime'] < target_date].reset_index(drop=True)
-        series_scaled = pd.Series(
-            scaler.transform(hourly_hist[['passenger_count']]).squeeze(),
-            index=hourly_hist.index
-        )
-        X, Y = self._build_windows(series_scaled)
+        hourly = self._prepare_zone_series(df, zone_id, target_date)
+
+        # Need enough history
+        # if len(hourly) < self.sequence_length + self.forecast_length:
+        #     raise ValueError(f"Zone {zone_id}: insufficient data for training. Got {len(hourly)} hours.")
+
+        X_tensor, y_tensor, scaler = self._build_training_windows(hourly)
 
         model = MultiScaleModel(self.cfg.hidden_size).to(device)
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.lr_full, weight_decay=self.cfg.weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.learning_rate)
 
-        best = float('inf'); patience = 0
+        best_loss = float('inf')
+        patience_ctr = 0
+
         model.train()
-        for ep in range(self.cfg.epochs_full):
+        for epoch in range(self.cfg.epochs_full):
             optimizer.zero_grad()
-            pred = model(X)
-            loss = criterion(pred, Y)
+            output = model(X_tensor)
+            loss = criterion(output, y_tensor)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
             optimizer.step()
 
-            cur = loss.item()
-            if cur < best:
-                best, patience = cur, 0
+            current = loss.item()
+            if current < best_loss:
+                best_loss = current
+                patience_ctr = 0
             else:
-                patience += 1
-                if patience >= self.cfg.patience_full:
+                patience_ctr += 1
+                if patience_ctr >= self.cfg.patience:
                     break
 
+        # Save after training
         self._save(zone_id, model, scaler)
-        self._save_meta(zone_id, last_trained_until=target_date - pd.Timedelta(hours=1))
+        self._save_meta(zone_id, target_date)
 
-    def incremental_update(
-        self,
-        df: pd.DataFrame,
-        zone_id: int,
-        prev_until: pd.Timestamp,
-        new_until: pd.Timestamp,
-        epochs: Optional[int] = None,
-        lr: Optional[float] = None,
-    ) -> None:
+    def incremental_update(self, df, zone_id, prev_until, new_until,
+                           epochs: int = 1, lr: float = 2e-4):
         """
-        用 (prev_until, new_until] 的每个标签小时 s 做微调。
-        对于每个 s：输入窗口 = [s-720, s-1]，标签 = s。
+        低显存版：逐小时流式微调。
+        对于每个 s∈(prev_until, new_until]：
+          输入 = [s-720, s-1] 的多尺度窗口；标签 = s。
+        一次只构建并训练一个样本，立刻释放中间张量，避免大 batch 堆积到 GPU。
         """
         if new_until <= prev_until:
             return
 
-        epochs = epochs if epochs is not None else self.cfg.epochs_incremental
-        lr = lr if lr is not None else self.cfg.lr_incremental
-
+        # 1) 载入模型与 scaler
         model, scaler = self._load(zone_id)
         model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=self.cfg.weight_decay)
-        criterion = nn.SmoothL1Loss()  # 稍稳健一些
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+        criterion = torch.nn.SmoothL1Loss()
 
-        # 准备完整序列（覆盖到 new_until）并仅 transform
-        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=new_until)
+        # 可选：混合精度（大幅降显存占用）
+        use_amp = torch.cuda.is_available()
+        scaler_amp = torch.cuda.amp.GradScaler(enabled=use_amp)
+
+        # 2) 准备完整序列（覆盖到 new_until），仅 transform，避免泄漏
+        hourly = self._prepare_zone_series(df, zone_id, new_until)
         hourly['passenger_count_scaled'] = scaler.transform(hourly[['passenger_count']])
+        series = hourly['passenger_count_scaled']
         idx = {t: i for i, t in enumerate(hourly['datetime'])}
 
-        s_list = pd.date_range(start=prev_until + pd.Timedelta(hours=1), end=new_until, freq="H")
         dur = self.durations
         L = self.cfg.sequence_length
-        series = hourly['passenger_count_scaled']
+        flen = self.cfg.forecast_length
 
-        X_1h, X_1d, X_1w, X_1m, Y = [], [], [], [], []
-        for s in s_list:
-            if s not in idx:
-                continue
-            end_i = idx[s]           # 标签在 s
-            start_i = end_i - L
-            if start_i < 0:
-                continue
-            if end_i + self.cfg.forecast_length > len(series):
-                continue
+        # 3) 逐小时流式微调：几乎恒定显存
+        s_list = pd.date_range(prev_until + pd.Timedelta(hours=1), new_until, freq='h')
 
-            X_1h.append(series.iloc[end_i - dur['1h']: end_i].values)
-            X_1d.append(series.iloc[end_i - dur['1d']: end_i].values)
-            X_1w.append(series.iloc[end_i - dur['1w']: end_i].values)
-            X_1m.append(series.iloc[start_i: end_i].values)
-            Y.append(series.iloc[end_i: end_i + self.cfg.forecast_length].values)
+        for ep in range(max(1, epochs)):
+            for s in s_list:
+                end_i = idx.get(s, None)
+                if end_i is None:
+                    continue
+                start_i = end_i - L
+                if start_i < 0 or end_i + flen > len(series):
+                    continue
 
-        if not X_1m:
-            # 没有新增样本（例如数据缺失）
-            self._save(zone_id, model, scaler)
-            self._save_meta(zone_id, prev_until)
-            return
+                # —— 单样本窗口（numpy → float32）——
+                x_1h = np.asarray(series.iloc[end_i - dur['1h']: end_i].values, dtype=np.float32)
+                x_1d = np.asarray(series.iloc[end_i - dur['1d']: end_i].values, dtype=np.float32)
+                x_1w = np.asarray(series.iloc[end_i - dur['1w']: end_i].values, dtype=np.float32)
+                x_1m = np.asarray(series.iloc[start_i: end_i].values, dtype=np.float32)
+                y = np.asarray(series.iloc[end_i: end_i + flen].values, dtype=np.float32)
 
-        X = {
-            '1h': torch.tensor(np.array(X_1h), dtype=torch.float32, device=device).unsqueeze(-1),
-            '1d': torch.tensor(np.array(X_1d), dtype=torch.float32, device=device).unsqueeze(-1),
-            '1w': torch.tensor(np.array(X_1w), dtype=torch.float32, device=device).unsqueeze(-1),
-            '1m': torch.tensor(np.array(X_1m), dtype=torch.float32, device=device).unsqueeze(-1),
-        }
-        Y = torch.tensor(np.array(Y), dtype=torch.float32, device=device)
+                # —— 构造 1 样本的字典张量（直接到 GPU）——
+                X = {
+                    '1h': torch.from_numpy(x_1h).to(device).view(1, -1, 1),
+                    '1d': torch.from_numpy(x_1d).to(device).view(1, -1, 1),
+                    '1w': torch.from_numpy(x_1w).to(device).view(1, -1, 1),
+                    '1m': torch.from_numpy(x_1m).to(device).view(1, -1, 1),
+                }
+                Y = torch.from_numpy(y).to(device).view(1, -1)
 
-        for _ in range(max(1, epochs)):
-            optimizer.zero_grad()
-            pred = model(X)
-            loss = criterion(pred, Y)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
-            optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                if use_amp:
+                    # with torch.cuda.amp.autocast():
+                    with torch.amp.autocast('cuda', ):
+                        pred = model(X)
+                        loss = criterion(pred, Y)
+                    scaler_amp.scale(loss).backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+                    scaler_amp.step(optimizer)
+                    scaler_amp.update()
+                else:
+                    pred = model(X)
+                    loss = criterion(pred, Y)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+                    optimizer.step()
 
+                # —— 及时释放（避免累计）——
+                del X, Y, pred, loss
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            # 注意：第二个 epoch 开始时，s_list 会复用；如需严格“只新增一次”，epochs 设 1 即可。
+
+        # 4) 保存微调后的权重 & 更新 meta
         self._save(zone_id, model, scaler)
         self._save_meta(zone_id, new_until)
+
 
     def predict(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> float:
         """用保存的模型对 target_date 小时做预测（输入为 [target-720, target-1]）"""
@@ -390,100 +452,58 @@ class MultiScaleModelManager:
                 # 旧模型没有 meta，保守起见完整训一次
                 self.train_once(df, zone_id, target_date)
             elif prev < target_date:
+                print(f"[inc] zone={zone_id} {prev} -> {target_date}")
                 self.incremental_update(df, zone_id, prev_until=prev, new_until=target_date)
+            else:
+                pass #已覆盖目标小时
         return self.predict(df, zone_id, target_date)
 
 
-# ============== 一个可直接运行的 main()（IDE 里点 ▶️ 即可） ==============
-
-# 用户可改的配置
-DATA_PATH = "data.parquet"
-LOOKUP_PATH = "taxi-zone-lookup.csv"
-CHECKPOINT_DIR = "checkpoints_multiscale_inc"
-
-START_TARGET = pd.Timestamp("2021-03-05 12:00")  # 第 721 小时
-ROLLING_STEPS = 2                                 # 连续预测小时数
-EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]    # 过滤的区域
-RETRAIN_EACH_HOUR = False                          # True = 每小时从零重训（仅调试用）
-
-
-def _prepare_df() -> pd.DataFrame:
-    df = pd.read_parquet(DATA_PATH, columns=["pickup_datetime", "PULocationID"])
-    df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
-    df["datetime"] = df["pickup_datetime"].dt.floor("H")
-    if EXCLUDED_ZONES:
-        df = df[~df["PULocationID"].isin(EXCLUDED_ZONES)].copy()
-    return df
-
-
-def _get_true_counts(df: pd.DataFrame, hour: pd.Timestamp) -> pd.Series:
-    return df[df["datetime"] == hour].groupby("PULocationID").size()
-
-
-def run_rolling(df: pd.DataFrame):
-    zones = sorted(df["PULocationID"].unique().tolist())
-    cfg = ManagerConfig()
-    base_mgr = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
-
-    rows, hours = [], []
-    for i in range(ROLLING_STEPS):
-        target = START_TARGET + pd.Timedelta(hours=i)
-        print(f"\n🕒 Target hour: {target}")
-
-        # 可选：每小时重训（独立目录，非增量，仅供对照/调试）
-        mgr = base_mgr
-        if RETRAIN_EACH_HOUR:
-            mgr = MultiScaleModelManager(
-                checkpoint_dir=str(Path(CHECKPOINT_DIR) / target.strftime("%Y%m%d_%H%M")),
-                cfg=cfg
-            )
-
-        y_true_map = _get_true_counts(df, target)
-        preds, trues = [], []
-        for zid in zones:
-            try:
-                y_pred = mgr.train_and_predict_if_needed(df, zid, target, auto_train=True)
-                y_true = float(y_true_map.get(zid, 0.0))
-                rows.append({"target_hour": target, "PULocationID": zid, "y_pred": y_pred, "y_true": y_true})
-                preds.append(y_pred); trues.append(y_true)
-            except Exception as e:
-                rows.append({"target_hour": target, "PULocationID": zid, "y_pred": np.nan, "y_true": np.nan, "error": str(e)})
-
-        # 小时级指标
-        preds = np.array(preds, dtype=float); trues = np.array(trues, dtype=float)
-        m = ~np.isnan(preds) & ~np.isnan(trues)
-        if m.any():
-            mae = float(np.mean(np.abs(preds[m] - trues[m])))
-            rmse = float(np.sqrt(np.mean((preds[m] - trues[m]) ** 2)))
-            hours.append({"target_hour": target, "MAE": mae, "RMSE": rmse, "N": int(m.sum())})
-            print(f"✅ Hourly MAE={mae:.3f}, RMSE={rmse:.3f}")
-        else:
-            hours.append({"target_hour": target, "MAE": np.nan, "RMSE": np.nan, "N": 0})
-            print("⚠️ 无有效样本计算指标")
-
-    # 保存
-    pred_df = pd.DataFrame(rows)
-    pred_df.to_csv("predictions_rolling.csv", index=False)
-    hour_df = pd.DataFrame(hours).sort_values("target_hour")
-    hour_df.to_csv("hourly_metrics.csv", index=False)
-
-    # Overall
-    m = pred_df.dropna(subset=["y_pred", "y_true"])
-    if not m.empty:
-        overall_mae = float(np.mean(np.abs(m["y_pred"].values - m["y_true"].values)))
-        overall_rmse = float(np.sqrt(np.mean((m["y_pred"].values - m["y_true"].values) ** 2)))
-    else:
-        overall_mae = overall_rmse = np.nan
-    with open("overall_metrics.txt", "w", encoding="utf-8") as f:
-        f.write(f"Overall MAE: {overall_mae}\nOverall RMSE: {overall_rmse}\n")
-    print(f"\n🎯 Overall MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
-    print("已保存：predictions_rolling.csv / hourly_metrics.csv / overall_metrics.txt")
-
-
-def main():
-    df = _prepare_df()
-    run_rolling(df)
-
-
-if __name__ == "__main__":
-    main()
+# def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
+#     """Helper to load the same columns and preprocessing as demo.py relies on."""
+#     columns_to_load = ['pickup_datetime', 'PULocationID']
+#     df = pd.read_parquet(parquet_path, columns=columns_to_load)
+#     df['pickup_datetime'] = pd.to_datetime(df['pickup_datetime'])
+#     df['datetime'] = df['pickup_datetime'].dt.floor('h')
+#     return df
+#
+#
+# if __name__ == "__main__":
+#     # Example CLI usage (minimal):
+#     #   python code/persistent_multiscale.py
+#     # It will train once per zone present in the data and then produce a
+#     # prediction for target_date for each zone without retraining.
+#
+#     import argparse
+#
+#     parser = argparse.ArgumentParser(description="Train-once and predict with MultiScaleModel per zone.")
+#     parser.add_argument("--data", type=str, default="data.parquet", help="Input parquet file path.")
+#     parser.add_argument("--target", type=str, default="2021-03-05 12:00", help="Target timestamp (YYYY-mm-dd HH:MM)")
+#     parser.add_argument("--hidden", type=int, default=64, help="Hidden size.")
+#     parser.add_argument("--checkpoints", type=str, default="checkpoints_multiscale", help="Checkpoint directory.")
+#     parser.add_argument("--zones", type=int, nargs="*", default=None, help="Optional list of PULocationID to process.")
+#     parser.add_argument("--no-auto-train", action="store_true", help="Disable auto-train when checkpoint missing.")
+#     args = parser.parse_args()
+#
+#     target_date = pd.Timestamp(args.target)
+#     df = _prepare_df_from_parquet(args.data)
+#
+#     manager = MultiScaleModelManager(checkpoint_dir=args.checkpoints, hidden_size=args.hidden)
+#
+#     # Select zones
+#     zones = args.zones if args.zones else sorted(df['PULocationID'].unique().tolist())
+#
+#     results = []
+#     for zid in zones:
+#         try:
+#             pred = manager.train_and_predict_if_needed(df, zid, target_date, auto_train=not args.no_auto_train)
+#             results.append({"PULocationID": zid, "Prediction": pred})
+#             print(f"Zone {zid}: Prediction @ {target_date} = {pred:.4f}")
+#         except Exception as e:
+#             print(f"Zone {zid}: skipped due to error -> {e}")
+#
+#     if results:
+#         out_csv = Path(args.checkpoints) / f"predictions_{target_date.strftime('%Y%m%d_%H%M')}.csv"
+#         out_csv.parent.mkdir(parents=True, exist_ok=True)
+#         pd.DataFrame(results).to_csv(out_csv, index=False)
+#         print(f"Saved predictions to {out_csv}")

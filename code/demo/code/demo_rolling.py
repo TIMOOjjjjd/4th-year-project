@@ -1,8 +1,12 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from persistent_multiscale import MultiScaleModelManager  # ⚠️ 改成你自己的模块路径
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import torch
 
+from persistent_multiscale_incremental import MultiScaleModelManager, ManagerConfig  # ⚠️ 改成你自己的模块路径
+# from persistent_multiscale import MultiScaleModelManager
 
 # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
 import shutil
@@ -24,9 +28,10 @@ DATA_PATH = "data.parquet"
 LOOKUP_PATH = "taxi-zone-lookup.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
-START_TARGET = pd.Timestamp("2021-03-05 12:00")  # 第721小时
-ROLLING_STEPS = 2                               # 连续预测24小时
+START_TARGET = pd.Timestamp("2021-03-06 8:00")  # 第721小时
+ROLLING_STEPS = 10                               # 连续预测24小时
 HIDDEN_SIZE = 64                                 # 模型隐藏层大小
+# EXCLUDED_ZONES = [1,2,3,   103, 104, 105, 46, 264, 265]   # 排除的区域
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]   # 排除的区域
 RETRAIN_EACH_HOUR = False                        # 是否每小时重新训练
 # =====================================================
@@ -35,8 +40,10 @@ RETRAIN_EACH_HOUR = False                        # 是否每小时重新训练
 def prepare_df():
     df = pd.read_parquet(DATA_PATH, columns=["pickup_datetime", "PULocationID"])
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
-    df["datetime"] = df["pickup_datetime"].dt.floor("H")
+    df["datetime"] = df["pickup_datetime"].dt.floor("h")
     df = df[~df["PULocationID"].isin(EXCLUDED_ZONES)]
+    # df = df[df["PULocationID"].isin(EXCLUDED_ZONES)]
+
     return df
 
 
@@ -52,7 +59,7 @@ def run_rolling(df, manager):
 
     for step in range(ROLLING_STEPS):
         target_ts = START_TARGET + pd.Timedelta(hours=step)
-        print(f"\n🕒 Predicting target hour: {target_ts}")
+        print(f"\n/////Predicting target hour: {target_ts} in step {step}/////")
 
         # 每小时重训：创建独立checkpoint目录
         if RETRAIN_EACH_HOUR:
@@ -67,6 +74,7 @@ def run_rolling(df, manager):
 
         for zid in zones:
             try:
+                print(f"-----current zone is {zid}-----")
                 pred = mgr.train_and_predict_if_needed(df, zid, target_ts, auto_train=True)
                 true_val = float(y_true_dict.get(zid, 0))
                 records.append({"target_hour": target_ts, "PULocationID": zid, "y_pred": pred, "y_true": true_val})
@@ -78,11 +86,20 @@ def run_rolling(df, manager):
         if preds:
             preds, trues = np.array(preds), np.array(trues)
             mask = ~np.isnan(preds) & ~np.isnan(trues)
+            mean_true = np.mean(trues[mask])
             if mask.any():
                 mae = np.mean(np.abs(preds[mask] - trues[mask]))
                 rmse = np.sqrt(np.mean((preds[mask] - trues[mask]) ** 2))
-                metrics.append({"target_hour": target_ts, "MAE": mae, "RMSE": rmse})
-                print(f"✅ MAE={mae:.3f}, RMSE={rmse:.3f}")
+
+                metrics.append({
+                    "target_hour": target_ts,
+                    "MAE": mae,
+                    "RMSE": rmse,
+                    "NMAE": mae / (mean_true + 1e-8),
+                    "NRMSE": rmse / (mean_true + 1e-8),
+                    "mean_true": mean_true
+                })
+                print(f"✅ MAE={mae:.3f}, RMSE={rmse:.3f}，NMAE={mae / (mean_true + 1e-8)}，NMSE={rmse / (mean_true + 1e-8)}")
             else:
                 metrics.append({"target_hour": target_ts, "MAE": np.nan, "RMSE": np.nan})
         else:
@@ -115,9 +132,17 @@ def run_rolling(df, manager):
 
 
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("CUDA available:", torch.cuda.is_available())
+    print("Using device:", device)
     df = prepare_df()
-    manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, hidden_size=HIDDEN_SIZE)
+
+    cfg = ManagerConfig(hidden_size=HIDDEN_SIZE)
+    manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
+    # manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, hidden_size=HIDDEN_SIZE)
+
     run_rolling(df, manager)
+
 
 
 if __name__ == "__main__":
