@@ -13,3 +13,10 @@ checkpoints_*/
 
 
 
+/.idea/.gitignore
+/.idea/4th-year-project.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/vcs.xml
+/code/demo/code/overall_metrics.txt

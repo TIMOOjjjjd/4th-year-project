@@ -5,8 +5,9 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import torch
 
-from persistent_multiscale_incremental import MultiScaleModelManager, ManagerConfig  # ⚠️ 改成你自己的模块路径
+# from persistent_multiscale_incremental import MultiScaleModelManager, ManagerConfig  # ⚠️ 改成你自己的模块路径
 # from persistent_multiscale import MultiScaleModelManager
+from persistent_multiscale_incre_confi import MultiScaleModelManager, ManagerConfig
 
 # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
 import shutil
