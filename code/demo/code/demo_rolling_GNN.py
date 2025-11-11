@@ -33,14 +33,21 @@ LOOKUP_PATH = "taxi-zone-lookup.csv"
 EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
-START_TARGET = pd.Timestamp("2021-03-06 12:00")
-ROLLING_STEPS = 2
+START_TARGET = pd.Timestamp("2021-03-10 00:00")
+ROLLING_STEPS = 3
 HIDDEN_SIZE = 64
-# EXCLUDED_ZONES = [1,2,3,103, 104, 105, 46, 264, 265]
+# EXCLUDED_ZONES = [1,2,3,4,5,6,100]
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
 MC_DROPOUT_SAMPLES = 10
 # =====================================================
+
+HISTORY_WINDOWS = {
+    "mean_24h": 24,
+    "mean_168h": 24 * 7,
+    "mean_720h": 24 * 30,
+}
+HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
 
 
 def _cleanup_old_checkpoints(root: Path) -> None:
@@ -64,6 +71,27 @@ def prepare_df() -> pd.DataFrame:
 def get_true_counts(df: pd.DataFrame, target_hour: pd.Timestamp) -> pd.Series:
     mask = df["datetime"] == target_hour
     return df.loc[mask].groupby("PULocationID").size()
+
+
+def _build_zone_hourly_counts(df: pd.DataFrame) -> pd.Series:
+    return df.groupby(["PULocationID", "datetime"]).size().rename("count")
+
+
+def _compute_history_means(
+    zone_hourly_counts: pd.Series, zone_id: int, target_hour: pd.Timestamp
+) -> Dict[str, float]:
+    means = {name: 0.0 for name in HISTORY_FEATURES}
+    try:
+        zone_series = zone_hourly_counts.loc[zone_id]
+    except KeyError:
+        return means
+
+    for feat_name, hours in HISTORY_WINDOWS.items():
+        start = target_hour - pd.Timedelta(hours=hours)
+        window = zone_series[(zone_series.index >= start) & (zone_series.index < target_hour)]
+        total = float(window.sum()) if not window.empty else 0.0
+        means[feat_name] = total / float(hours)
+    return means
 
 
 def _load_zone_lookup(path: str) -> pd.DataFrame:
@@ -218,6 +246,7 @@ def run_rolling_with_gnn(
     device: torch.device,
     prior_scores: Dict[int, float],
     adjacency: Dict[int, List[int]],
+    zone_hourly_counts: pd.Series,
 ) -> None:
     zones = sorted(df["PULocationID"].unique())
 
@@ -248,6 +277,7 @@ def run_rolling_with_gnn(
                 point, std, _ = mgr.predict_with_uncertainty(df, zid, target_ts)
                 variance = float(std ** 2)
                 true_val = float(y_true_dict.get(zid, 0.0))
+                history_means = _compute_history_means(zone_hourly_counts, zid, target_ts)
                 step_records.append(
                     {
                         "PULocationID": zid,
@@ -256,6 +286,7 @@ def run_rolling_with_gnn(
                         "mc_std": float(std),
                         "variance": variance,
                         "error": "",
+                        **history_means,
                     }
                 )
             except Exception as exc:  # noqa: BLE001
@@ -267,6 +298,7 @@ def run_rolling_with_gnn(
                         "mc_std": np.nan,
                         "variance": np.nan,
                         "error": str(exc),
+                        **{feat: np.nan for feat in HISTORY_FEATURES},
                     }
                 )
 
@@ -294,9 +326,9 @@ def run_rolling_with_gnn(
             }
         )
 
-        gnn_input = step_df.rename(columns={"y_pred": "Prediction", "y_true": "True Value"})[
-            ["PULocationID", "Prediction", "True Value"]
-        ]
+        rename_map = {"y_pred": "Prediction", "y_true": "True Value"}
+        gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
+        gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
 
         gnn_output_path = f"final_pred_ms_gnn\final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
         gnn_output_df, gnn_metric = run_gnn_pipeline(
@@ -376,10 +408,11 @@ def main() -> None:
     prior_scores = _compute_prior_scores(df)
     lookup_df = _load_zone_lookup(LOOKUP_PATH)
     adjacency = _build_zone_adjacency(EDGE_WEIGHT_MATRIX, lookup_df)
+    zone_hourly_counts = _build_zone_hourly_counts(df)
     cfg = ManagerConfig(hidden_size=HIDDEN_SIZE, M_mc_test=MC_DROPOUT_SAMPLES)
     manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
 
-    run_rolling_with_gnn(df, manager, device, prior_scores, adjacency)
+    run_rolling_with_gnn(df, manager, device, prior_scores, adjacency, zone_hourly_counts)
 
 
 if __name__ == "__main__":

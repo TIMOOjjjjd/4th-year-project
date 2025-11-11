@@ -12,6 +12,8 @@ from torch_geometric.data import Data
 from torch_geometric.nn import SAGEConv
 from torch_geometric.utils import dense_to_sparse
 
+HISTORY_FEATURES = ["mean_24h", "mean_168h", "mean_720h"]
+
 
 class MultiScaleGraphSAGE(nn.Module):
     """Two-layer GraphSAGE with dropout and GELU activations."""
@@ -25,7 +27,7 @@ class MultiScaleGraphSAGE(nn.Module):
 
     def forward(self, data: Data) -> torch.Tensor:
         x, edge_index = data.x, data.edge_index
-        base_pred = x[:, 0].clone()
+        base_pred = getattr(data, "base_pred", x[:, 0])
         confidence = getattr(data, "confidence", None)
 
         x = self.sage1(x, edge_index)
@@ -36,10 +38,11 @@ class MultiScaleGraphSAGE(nn.Module):
         x = F.gelu(x)
         x = self.dropout(x)
 
-        refined = self.out_linear(x).squeeze(-1)
+        residual = self.out_linear(x).squeeze(-1)
+        refined = base_pred + residual
         if confidence is not None:
             refined = confidence * refined + (1.0 - confidence) * base_pred
-        return refined
+        return residual, refined
 
 
 def _prepare_predictions_frame(
@@ -151,6 +154,7 @@ def run_gnn_pipeline(
     """
     df_pred = _prepare_predictions_frame(merged_csv_path, predictions_df)
     df_pred = df_pred[~df_pred["PULocationID"].isin(excluded_zones)].reset_index(drop=True)
+    history_feature_cols = [col for col in HISTORY_FEATURES if col in df_pred.columns]
 
     df_adj = pd.read_csv(edge_weight_csv, index_col=0)
     adj_matrix = torch.tensor(df_adj.values, dtype=torch.float32)
@@ -187,6 +191,11 @@ def run_gnn_pipeline(
     df_pred["Zone"] = df_pred["PULocationID"].map(location_to_zone)
     node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
     node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
+    history_tensor = (
+        torch.full((node_count, len(history_feature_cols)), float("nan"), dtype=torch.float32)
+        if history_feature_cols
+        else None
+    )
 
     for _, row in df_pred.iterrows():
         zone_str = row["Zone"]
@@ -197,6 +206,15 @@ def run_gnn_pipeline(
             continue
         node_pred[idx] = float(row["Prediction"])
         node_label[idx] = float(row["True Value"])
+        if history_tensor is not None:
+            values = []
+            for col in history_feature_cols:
+                val = row.get(col)
+                if pd.notna(val):
+                    values.append(float(val))
+                else:
+                    values.append(float("nan"))
+            history_tensor[idx] = torch.tensor(values, dtype=torch.float32)
 
     print("node_pred NaN count:", torch.isnan(node_pred).sum().item())
     print("node_label NaN count:", torch.isnan(node_label).sum().item())
@@ -229,9 +247,28 @@ def run_gnn_pipeline(
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
     node_weights = node_weights[valid_indices]
+    if history_tensor is not None:
+        history_tensor = history_tensor[valid_indices]
+        history_tensor = torch.nan_to_num(history_tensor, nan=0.0)
+        history_tensor = torch.log1p(history_tensor)
 
-    x_feat = torch.stack([node_pred, node_weights], dim=1)
-    data = Data(x=x_feat, edge_index=edge_index, y=node_label, confidence=node_weights)
+    node_pred_cpu = node_pred.clone()
+    node_label_cpu = node_label.clone()
+    node_weights_cpu = node_weights.clone()
+
+    residual_target = node_label - node_pred
+
+    feat_components = [node_pred.unsqueeze(1), node_weights.unsqueeze(1)]
+    if history_tensor is not None and history_tensor.numel() > 0:
+        feat_components.append(history_tensor)
+    x_feat = torch.cat(feat_components, dim=1)
+    data = Data(
+        x=x_feat,
+        edge_index=edge_index,
+        y=residual_target,
+        base_pred=node_pred,
+        confidence=node_weights,
+    )
     if zone_confidence is not None:
         conf_edge_weight = node_weights[edge_index[0]] * node_weights[edge_index[1]]
         data.edge_weight = conf_edge_weight
@@ -241,23 +278,27 @@ def run_gnn_pipeline(
     hidden_dim = 256
     gnn_epochs = 300
 
-    model = MultiScaleGraphSAGE(in_dim=2, hidden_dim=hidden_dim, dropout=dropout).to(device)
+    in_dim = x_feat.shape[1]
+    model = MultiScaleGraphSAGE(in_dim=in_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=gnn_epochs)
     loss_func = nn.SmoothL1Loss(reduction="none")
 
     data = data.to(device)
-    node_weights = node_weights.to(device)
+    node_label_device = node_label_cpu.to(device)
 
     model.train()
     for epoch in range(1, gnn_epochs + 1):
         optimizer.zero_grad()
-        pred = model(data)
-        loss_per_node = loss_func(pred, data.y)
+        residual_pred, refined_pred = model(data)
+        loss_per_node = loss_func(residual_pred, data.y)
+        diff = refined_pred - node_label_device
+        sign_penalty = 0.1 * torch.relu(torch.sign(diff) * diff)
+        loss_per_node = loss_per_node + sign_penalty
         if zone_confidence is not None:
-            sample_weights = node_weights
+            sample_weights = data.confidence
         else:
-            sample_weights = torch.ones_like(node_weights)
+            sample_weights = torch.ones_like(data.y)
         mean_weight = sample_weights.mean().clamp(min=1e-6)
         normalized_weights = sample_weights / mean_weight
         loss = (loss_per_node * normalized_weights).mean()
@@ -274,12 +315,12 @@ def run_gnn_pipeline(
 
     model.eval()
     with torch.no_grad():
-        refined_pred = model(data)
+        residual_pred, refined_pred = model(data)
 
-    y_true = data.y.cpu().numpy().squeeze()
+    y_true = node_label_cpu.cpu().numpy().squeeze()
     y_refined = refined_pred.cpu().numpy().squeeze()
-    node_pred_base = node_pred.cpu().numpy().squeeze()
-    confidence_vals = node_weights.cpu().numpy().squeeze()
+    node_pred_base = node_pred_cpu.cpu().numpy().squeeze()
+    confidence_vals = node_weights_cpu.cpu().numpy().squeeze()
 
     print("Final shapes:")
     print("node_pred shape:", node_pred_base.shape)
