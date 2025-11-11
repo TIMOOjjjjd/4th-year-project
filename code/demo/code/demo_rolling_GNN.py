@@ -33,7 +33,7 @@ LOOKUP_PATH = "taxi-zone-lookup.csv"
 EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
-START_TARGET = pd.Timestamp("2021-03-10 00:00")
+START_TARGET = pd.Timestamp("2021-03-05 00:00")
 ROLLING_STEPS = 3
 HIDDEN_SIZE = 64
 # EXCLUDED_ZONES = [1,2,3,4,5,6,100]
@@ -330,7 +330,7 @@ def run_rolling_with_gnn(
         gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
         gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
 
-        gnn_output_path = f"final_pred_ms_gnn\final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
+        gnn_output_path = f"final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
         gnn_output_df, gnn_metric = run_gnn_pipeline(
             df_temp=df,
             target_date=target_ts,
