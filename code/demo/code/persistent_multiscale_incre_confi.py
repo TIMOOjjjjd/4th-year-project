@@ -159,6 +159,11 @@ class MultiScaleModelManager:
         self.cfg = cfg or ManagerConfig()
         self.durations = {"1h": 1, "1d": 24, "1w": 24 * 7, "1m": 24 * 30}
 
+    @property
+    def _forecast_delta(self) -> pd.Timedelta:
+        """Forecast horizon expressed as timedelta (hourly granularity)."""
+        return pd.Timedelta(hours=self.cfg.forecast_length)
+
     # ---------- paths ----------
     def _model_path(self, zone_id: int) -> Path:
         return self.checkpoint_dir / f"multiscale_zone_{zone_id}.pt"
@@ -191,8 +196,8 @@ class MultiScaleModelManager:
             scaler = pickle.load(f)
         return model, scaler
 
-    def _save_meta(self, zone_id: int, last_trained_until: pd.Timestamp) -> None:
-        meta = {"last_trained_until": str(last_trained_until)}
+    def _save_meta(self, zone_id: int, context_end: pd.Timestamp) -> None:
+        meta = {"last_trained_context_end": str(context_end)}
         with open(self._meta_path(zone_id), "w", encoding="utf-8") as f:
             json.dump(meta, f)
 
@@ -201,7 +206,8 @@ class MultiScaleModelManager:
         if not path.exists():
             return None
         meta = json.load(open(path, "r", encoding="utf-8"))
-        return pd.Timestamp(meta["last_trained_until"])
+        ts = meta.get("last_trained_context_end") or meta.get("last_trained_until")
+        return pd.Timestamp(ts) if ts is not None else None
 
     # ---------- data prep ----------
     def _prepare_zone_series(self, df: pd.DataFrame, zone_id: int, end_inclusive: pd.Timestamp) -> pd.DataFrame:
@@ -278,17 +284,17 @@ class MultiScaleModelManager:
         return X_tensor, y_tensor, scaler
 
     def _build_inference_window(
-        self, hourly: pd.DataFrame, scaler: MinMaxScaler, target_date: pd.Timestamp
+        self, hourly: pd.DataFrame, scaler: MinMaxScaler, context_end: pd.Timestamp
     ) -> Dict[str, torch.Tensor]:
         L = self.cfg.sequence_length
         hourly = hourly.copy()
         hourly["passenger_count_scaled"] = scaler.transform(hourly[["passenger_count"]])
 
         idx_map = {ts: idx for idx, ts in enumerate(hourly["datetime"])}
-        if target_date not in idx_map:
-            raise ValueError("target_date missing from hourly series.")
+        if context_end not in idx_map:
+            raise ValueError("context_end missing from hourly series.")
 
-        end_idx = idx_map[target_date]
+        end_idx = idx_map[context_end]
         start_idx = end_idx - L
         if start_idx < 0:
             raise ValueError("Not enough history to assemble inference window.")
@@ -329,11 +335,11 @@ class MultiScaleModelManager:
         return std_scaled * data_range
 
     # ---------- training ----------
-    def train_once(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> None:
+    def train_once(self, df: pd.DataFrame, zone_id: int, context_end: pd.Timestamp) -> None:
         if self.has_checkpoint(zone_id):
             return
 
-        hourly = self._prepare_zone_series(df, zone_id, target_date)
+        hourly = self._prepare_zone_series(df, zone_id, context_end)
         X_tensor, y_tensor, scaler = self._build_training_windows(hourly)
 
         model = MultiScaleModel(self.cfg.hidden_size, p_drop=self.cfg.p_drop).to(device)
@@ -373,7 +379,7 @@ class MultiScaleModelManager:
                     break
 
         self._save(zone_id, model, scaler)
-        self._save_meta(zone_id, target_date)
+        self._save_meta(zone_id, context_end)
 
     def incremental_update(
         self,
@@ -461,9 +467,10 @@ class MultiScaleModelManager:
             raise FileNotFoundError(f"Zone {zone_id} has no checkpoint; train first.")
 
         model, _ = self._load(zone_id)
-        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=target_date)
+        context_end = target_date - self._forecast_delta
+        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=context_end)
         scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
-        X_last = self._build_inference_window(hourly, scaler, target_date)
+        X_last = self._build_inference_window(hourly, scaler, context_end)
 
         model.eval()
         with torch.no_grad():
@@ -479,9 +486,10 @@ class MultiScaleModelManager:
             raise FileNotFoundError(f"Zone {zone_id} has no checkpoint; train first.")
 
         model, _ = self._load(zone_id)
-        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=target_date)
+        context_end = target_date - self._forecast_delta
+        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=context_end)
         scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
-        X_last = self._build_inference_window(hourly, scaler, target_date)
+        X_last = self._build_inference_window(hourly, scaler, context_end)
 
         model.eval()
         with torch.no_grad():
@@ -505,17 +513,18 @@ class MultiScaleModelManager:
     def train_and_predict_if_needed(
         self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp, auto_train: bool = True
     ) -> float:
+        context_end = target_date - self._forecast_delta
         if not self.has_checkpoint(zone_id):
             if not auto_train:
                 raise FileNotFoundError(f"No checkpoint for zone {zone_id} and auto_train is False.")
-            self.train_once(df, zone_id, target_date)
+            self.train_once(df, zone_id, context_end)
         else:
             prev = self._load_meta(zone_id)
             if prev is None:
-                self.train_once(df, zone_id, target_date)
-            elif prev < target_date:
-                print(f"[inc] zone={zone_id} {prev} -> {target_date}")
-                self.incremental_update(df, zone_id, prev_until=prev, new_until=target_date)
+                self.train_once(df, zone_id, context_end)
+            elif prev < context_end:
+                print(f"[inc] zone={zone_id} {prev} -> {context_end}")
+                self.incremental_update(df, zone_id, prev_until=prev, new_until=context_end)
 
         return self.predict(df, zone_id, target_date)
 
