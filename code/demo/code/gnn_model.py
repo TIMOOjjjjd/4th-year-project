@@ -293,8 +293,14 @@ def run_gnn_pipeline(
         residual_pred, refined_pred = model(data)
         loss_per_node = loss_func(residual_pred, data.y)
         diff = refined_pred - node_label_device
-        sign_penalty = 0.1 * torch.relu(torch.sign(diff) * diff)
-        loss_per_node = loss_per_node + sign_penalty
+        sign_penalty = 0.02 * torch.relu(torch.sign(diff) * diff)
+
+        target_residual = data.y
+        significant_target = target_residual.abs() > 5.0
+        sign_mismatch_mask = significant_target & ((residual_pred * target_residual) < 0)
+        mismatch_penalty = 0.1 * sign_mismatch_mask.float() * torch.abs(residual_pred - target_residual)
+
+        loss_per_node = loss_per_node + sign_penalty + mismatch_penalty
         if zone_confidence is not None:
             sample_weights = data.confidence
         else:
