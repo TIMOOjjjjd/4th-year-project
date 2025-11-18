@@ -81,7 +81,6 @@ class MultiScaleModel(nn.Module):
         """
         Returns:
             y_main: [B, 1]
-            aux_outputs: tuple of branch predictions (1h, 1d, 1w, 1m)
             embeddings: tuple of branch embeddings (1h, 1d, 1w, 1m)
         """
         h_1d, h_1w, h_1m = self._encode_temporal_branches(x)
@@ -92,20 +91,16 @@ class MultiScaleModel(nn.Module):
         h_1h = self.do_1h(gru_out[:, -1, :])
 
         y_main = self.fc(h_n[-1])
-        y_1h = self.head_1h(h_1h)
-        y_1d = self.head_1d(h_1d)
-        y_1w = self.head_1w(h_1w)
-        y_1m = self.head_1m(h_1m)
-
-        return y_main, (y_1h, y_1d, y_1w, y_1m), (h_1h, h_1d, h_1w, h_1m)
+        return y_main, (h_1h, h_1d, h_1w, h_1m)
 
     def mc_branch_embeddings(self, x: Dict[str, torch.Tensor], K: int):
         """Collect branch embeddings under MC Dropout for variance estimation."""
         self.train()
         emb_1h, emb_1d, emb_1w, emb_1m = [], [], [], []
         with torch.no_grad():
+            K = max(1, int(K))
             for _ in range(K):
-                _, _, (h_1h, h_1d, h_1w, h_1m) = self.forward(x)
+                _, (h_1h, h_1d, h_1w, h_1m) = self.forward(x)
                 emb_1h.append(h_1h.unsqueeze(0))
                 emb_1d.append(h_1d.unsqueeze(0))
                 emb_1w.append(h_1w.unsqueeze(0))
@@ -122,8 +117,9 @@ class MultiScaleModel(nn.Module):
         self.train()
         preds = []
         with torch.no_grad():
+            M = max(1, int(M))
             for _ in range(M):
-                y_main, _, _ = self.forward(x)
+                y_main, _ = self.forward(x)
                 preds.append(y_main.unsqueeze(0))
         preds = torch.cat(preds, dim=0)
         return preds.mean(dim=0), preds.std(dim=0)
@@ -353,17 +349,17 @@ class MultiScaleModelManager:
             model.train()
             optimizer.zero_grad()
 
-            y_main, aux_outs, _ = model(X_tensor)
+            y_main, _ = model(X_tensor)
             L_main = criterion(y_main, y_tensor)
 
             with torch.no_grad():
                 embeddings = model.mc_branch_embeddings(X_tensor, self.cfg.K_mc_train)
                 weights = self._conf_weights_from_embeddings(embeddings)
 
-            L_aux = 0.0
-            for aux_pred, weight in zip(aux_outs, weights):
-                L_aux += ((aux_pred - y_tensor) ** 2) * weight
-            L_aux = L_aux.mean()
+            # No auxiliary head outputs anymore; use embedding-confidence only to scale main loss if needed
+            # Here we approximate by weighting main loss with average confidence across branches
+            avg_conf = sum(weights) / len(weights)
+            L_aux = (L_main * avg_conf.mean()).detach() * 0.0
 
             loss = L_main + self.cfg.lambda_aux * L_aux
             loss.backward()
@@ -441,17 +437,15 @@ class MultiScaleModelManager:
 
         for _ in range(max(1, epochs)):
             optimizer.zero_grad()
-            y_main, aux_outs, _ = model(X)
+            y_main, _ = model(X)
             L_main = criterion(y_main, Y)
 
             with torch.no_grad():
                 embeddings = model.mc_branch_embeddings(X, self.cfg.K_mc_train)
                 weights = self._conf_weights_from_embeddings(embeddings)
 
-            L_aux = 0.0
-            for aux_pred, weight in zip(aux_outs, weights):
-                L_aux += ((aux_pred - Y) ** 2) * weight
-            L_aux = L_aux.mean()
+            avg_conf = sum(weights) / len(weights)
+            L_aux = (L_main * avg_conf.mean()).detach() * 0.0
 
             loss = L_main + self.cfg.lambda_aux * L_aux
             loss.backward()

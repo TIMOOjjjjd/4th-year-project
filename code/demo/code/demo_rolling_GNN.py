@@ -34,7 +34,7 @@ EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
 START_TARGET = pd.Timestamp("2021-03-05 00:00")
-ROLLING_STEPS = 3
+ROLLING_STEPS = 24
 HIDDEN_SIZE = 64
 # EXCLUDED_ZONES = [1,2,3,4,5,6,100]
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]

@@ -28,7 +28,6 @@ class MultiScaleGraphSAGE(nn.Module):
     def forward(self, data: Data) -> torch.Tensor:
         x, edge_index = data.x, data.edge_index
         base_pred = getattr(data, "base_pred", x[:, 0])
-        confidence = getattr(data, "confidence", None)
 
         x = self.sage1(x, edge_index)
         x = F.gelu(x)
@@ -40,8 +39,6 @@ class MultiScaleGraphSAGE(nn.Module):
 
         residual = self.out_linear(x).squeeze(-1)
         refined = base_pred + residual
-        if confidence is not None:
-            refined = confidence * refined + (1.0 - confidence) * base_pred
         return residual, refined
 
 
