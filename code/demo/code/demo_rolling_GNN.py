@@ -45,7 +45,7 @@ MC_DROPOUT_SAMPLES = 10
 HISTORY_WINDOWS = {
     "mean_24h": 24,
     "mean_168h": 24 * 7,
-    "mean_720h": 24 * 30,
+    "mean_720h": 24 * 15,
 }
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
 
@@ -65,6 +65,9 @@ def prepare_df() -> pd.DataFrame:
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
     df["datetime"] = df["pickup_datetime"].dt.floor("H")
     df = df[~df["PULocationID"].isin(EXCLUDED_ZONES)]
+    print("Earliest timestamp:", df["datetime"].min())
+    print("Latest timestamp:", df["datetime"].max())
+    print("Total hours:", df["datetime"].nunique())
     return df
 
 
@@ -219,7 +222,7 @@ def _assign_confidence_scores(
 ) -> Dict[int, float]:
     stability_scores = _compute_stability_scores(step_df)
     neighborhood_scores = _compute_neighborhood_scores(step_df, adjacency)
-    weights = {"prior": 0.4, "stability": 0.35, "neighborhood": 0.25}
+    weights = {"prior": 0.3, "stability": 0.4, "neighborhood": 0.3}
 
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
@@ -252,7 +255,7 @@ def run_rolling_with_gnn(
 
     baseline_records: List[pd.DataFrame] = []
     gnn_records: List[pd.DataFrame] = []
-    baseline_metrics: List[Dict[str, float]] = []
+    baseline_metrics: List[Dict[str, float]] = [] #{ "target_hour": <Timestamp>, "MAE": <float>, "RMSE": <float>, "mean_true": <float> },
     gnn_metrics: List[Dict[str, float]] = []
 
     for step in range(ROLLING_STEPS):
@@ -267,7 +270,7 @@ def run_rolling_with_gnn(
         else:
             mgr = manager
 
-        y_true_dict = get_true_counts(df, target_ts)
+        y_true_dict = get_true_counts(df, target_ts) #{10: 3, 11: 0, 12: 5, ...}
         step_records: List[Dict[str, float]] = []
 
         for zid in zones:
@@ -290,6 +293,11 @@ def run_rolling_with_gnn(
                     }
                 )
             except Exception as exc:  # noqa: BLE001
+                # Diagnostics: print exception type and message for this zone/target
+                try:
+                    print(f"[diag] zone={zid} target={target_ts} error={type(exc).__name__}: {exc}")
+                except Exception:
+                    pass
                 step_records.append(
                     {
                         "PULocationID": zid,
@@ -417,3 +425,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+# parpare_df() 负责导入dataframe，并进行预处理，包括提取pickup location 和 pickuptime，去除没有数据的taxizone
+# _compute_prior_scores(df)负责统计每一个taxizone的历史数据量并进行归一化，作为GraphSAGE confidence的其中一个参考
+# _load_zone_lookup()负责对应zonename和zoneid
+# _build_zone_adjacency 构建一个 以 LocationID 为 key 的邻接表（adjacency list），用于GraphSAGE GNN。 使用edgeweight matrix（如果 OD 流量为 0 → 不视为邻居
+# 如果 >0 → 视为有边）
+# _build_zone_hourly_counts 按 Taxi Zone（PULocationID） + 小时（datetime） 分组统计订单数量，（每个区域每小时有多少订单？）返回 pandas series
+# cfg定义RNN参数
+# 配置 cfg和 MultiScaleModelManager（chekpointpath 和 cfg）
+#启动run_rolling_with_gnn（df, manager, device, prior_scores, adjacency, zone_hourly_counts）

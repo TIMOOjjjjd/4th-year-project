@@ -106,7 +106,7 @@ class MultiScaleModel(nn.Module):
                 emb_1w.append(h_1w.unsqueeze(0))
                 emb_1m.append(h_1m.unsqueeze(0))
         return (
-            torch.cat(emb_1h, dim=0),
+            torch.cat(emb_1h, dim=0), #dimention 0 拼接 k个shape (1,batch_size,hidden_size) 得到 (k,batch_size,hidden_size)
             torch.cat(emb_1d, dim=0),
             torch.cat(emb_1w, dim=0),
             torch.cat(emb_1m, dim=0),
@@ -135,7 +135,8 @@ class ManagerConfig:
     lr_incremental: float = 2e-4
     weight_decay: float = 1e-4
     grad_clip: float = 2.0
-    sequence_length: int = 24 * 30
+    sequence_length: int = 24 * 29
+    history_span_hours: int = 24 * 30
     forecast_length: int = 1
     p_drop: float = 0.2
     lambda_aux: float = 0.5
@@ -153,7 +154,7 @@ class MultiScaleModelManager:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.cfg = cfg or ManagerConfig()
-        self.durations = {"1h": 1, "1d": 24, "1w": 24 * 7, "1m": 24 * 30}
+        self.durations = {"1h": 1, "1d": 24, "1w": 24 * 7, "1m": 24 * 29}
 
     @property
     def _forecast_delta(self) -> pd.Timedelta:
@@ -207,10 +208,13 @@ class MultiScaleModelManager:
 
     # ---------- data prep ----------
     def _prepare_zone_series(self, df: pd.DataFrame, zone_id: int, end_inclusive: pd.Timestamp) -> pd.DataFrame:
-        """Return dense hourly counts from [end_inclusive - sequence_length, end_inclusive]."""
+        """Return dense hourly counts from [end_inclusive - history_span_hours, end_inclusive]."""
         assert {"datetime", "PULocationID"} <= set(df.columns)
 
-        start_date = end_inclusive - pd.Timedelta(hours=self.cfg.sequence_length)
+        # ❗ 用 history_span_hours 控制喂给模型的总历史长度（你想要的 720h）
+        span = getattr(self.cfg, "history_span_hours", self.cfg.sequence_length)
+        start_date = end_inclusive - pd.Timedelta(hours=span)
+
         zone_df = df[df["PULocationID"] == zone_id].copy()
         hourly = zone_df.groupby("datetime").size().reset_index(name="passenger_count")
 
@@ -257,6 +261,14 @@ class MultiScaleModelManager:
         hourly["passenger_count_scaled"] = scaler.transform(hourly[["passenger_count"]])
 
         X_1h, X_1d, X_1w, X_1m, y = [], [], [], [], []
+        # Diagnostics: report history coverage and intended windowing
+        try:
+            first_ts = hourly["datetime"].min()
+            last_ts = hourly["datetime"].max()
+            print(f"[TRAIN-DIAG] zone={hourly['PULocationID'].iloc[0] if 'PULocationID' in hourly else '?'} "
+                  f"history_hours={len(hourly)} range=[{first_ts} .. {last_ts}] seq_len={seq_len} flen={flen}")
+        except Exception:
+            pass
         for i in range(len(hourly) + 1 - seq_len - flen):
             series = hourly["passenger_count_scaled"]
             X_1h.append(series.iloc[i + seq_len - self.durations["1h"] : i + seq_len].values)
@@ -268,7 +280,17 @@ class MultiScaleModelManager:
                 y.append(y_val)
 
         if not X_1m:
-            raise ValueError("Insufficient history to build any training window.")
+            # More informative error with context
+            raise ValueError(
+                f"Insufficient history to build any training window: "
+                f"history_hours={len(hourly)} seq_len={seq_len} flen={flen}"
+            )
+
+        num_windows = len(y)
+        print(f"[TRAIN] zone={hourly['PULocationID'].iloc[0] if 'PULocationID' in hourly else '?'} "
+              f"total_hours={len(hourly)} train_windows={num_windows}")
+        if num_windows == 0:
+            print("[TRAIN-WARN] Built 0 windows after loop; check indexing and flen alignment.")
 
         X_tensor = {
             "1h": torch.tensor(np.array(X_1h), dtype=torch.float32, device=device).unsqueeze(-1),
@@ -288,12 +310,16 @@ class MultiScaleModelManager:
 
         idx_map = {ts: idx for idx, ts in enumerate(hourly["datetime"])}
         if context_end not in idx_map:
-            raise ValueError("context_end missing from hourly series.")
+            raise ValueError(f"context_end {context_end} missing from hourly series; known range "
+                             f"[{hourly['datetime'].min()} .. {hourly['datetime'].max()}]")
 
         end_idx = idx_map[context_end]
         start_idx = end_idx - L
         if start_idx < 0:
-            raise ValueError("Not enough history to assemble inference window.")
+            raise ValueError(
+                f"Not enough history to assemble inference window: need L={L} before {context_end}, "
+                f"but start_idx={start_idx}"
+            )
 
         series = hourly["passenger_count_scaled"]
         X = {
@@ -306,16 +332,18 @@ class MultiScaleModelManager:
 
     @staticmethod
     def _conf_weights_from_embeddings(embeddings: Tuple[torch.Tensor, ...], eps: float = 1e-6):
+        """calculate confidence weights from embeddings by var first them mean and finally 1.0 / (var_1h + eps)"""
         emb_1h, emb_1d, emb_1w, emb_1m = embeddings
         var_1h = emb_1h.var(dim=0).mean(dim=1, keepdim=True)
         var_1d = emb_1d.var(dim=0).mean(dim=1, keepdim=True)
         var_1w = emb_1w.var(dim=0).mean(dim=1, keepdim=True)
         var_1m = emb_1m.var(dim=0).mean(dim=1, keepdim=True)
-
+#var_1h.shape = （number_of_mc， 1batch, 64hidden_size） --->(1batch, 64hidden_size) ----->（1，）keepdim
         conf_1h = 1.0 / (var_1h + eps)
         conf_1d = 1.0 / (var_1d + eps)
         conf_1w = 1.0 / (var_1w + eps)
         conf_1m = 1.0 / (var_1m + eps)
+        #方差+e求倒数，方差越小conf越大
 
         conf_sum = conf_1h + conf_1d + conf_1w + conf_1m
         return (
@@ -422,6 +450,10 @@ class MultiScaleModelManager:
             X_1m.append(series.iloc[start_idx:end_idx].values)
             Y.append(series.iloc[end_idx : end_idx + self.cfg.forecast_length].values)
 
+        num_windows = len(X_1m)
+        print(f"[INC]  zone={zone_id} incremental_hours={len(hourly)} train_windows={num_windows} "
+              f"{'(SKIPPED)' if num_windows == 0 else ''}")
+
         if not X_1m:
             self._save(zone_id, model, scaler)
             self._save_meta(zone_id, prev_until)
@@ -490,8 +522,8 @@ class MultiScaleModelManager:
             mean_scaled, std_scaled = model.mc_predict(X_last, self.cfg.M_mc_test)
             embeddings = model.mc_branch_embeddings(X_last, self.cfg.M_mc_test)
 
-        mean_np = mean_scaled.cpu().numpy()
-        std_np = std_scaled.cpu().numpy()
+        mean_np = mean_scaled.cpu().numpy() #均值(归一化后)
+        std_np = std_scaled.cpu().numpy()   #标准误差（归一化后）
         point = scaler.inverse_transform(mean_np)[0, 0]
         std_orig = float(self._inverse_std_minmax(std_np, scaler)[0, 0])
 
@@ -507,6 +539,7 @@ class MultiScaleModelManager:
     def train_and_predict_if_needed(
         self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp, auto_train: bool = True
     ) -> float:
+        """decide whether model need normal train or incremental train."""
         context_end = target_date - self._forecast_delta
         if not self.has_checkpoint(zone_id):
             if not auto_train:
@@ -520,50 +553,51 @@ class MultiScaleModelManager:
                 print(f"[inc] zone={zone_id} {prev} -> {context_end}")
                 self.incremental_update(df, zone_id, prev_until=prev, new_until=context_end)
 
-        return self.predict(df, zone_id, target_date)
+        # return self.predict(df, zone_id, target_date)
+        return None
 
 
-def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
-    cols = ["pickup_datetime", "PULocationID"]
-    df = pd.read_parquet(parquet_path, columns=cols)
-    df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
-    df["datetime"] = df["pickup_datetime"].dt.floor("H")
-    return df
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Incremental multiscale forecasting with confidence weighting.")
-    parser.add_argument("--data", type=str, default="data.parquet", help="Input parquet file path.")
-    parser.add_argument("--target", type=str, default="2021-03-05 12:00", help="Target timestamp (YYYY-mm-dd HH:MM)")
-    parser.add_argument("--hidden", type=int, default=64, help="Hidden size for the model.")
-    parser.add_argument("--checkpoints", type=str, default="checkpoints_multiscale", help="Checkpoint directory.")
-    parser.add_argument("--zones", type=int, nargs="*", default=None, help="Optional list of PULocationID to process.")
-    parser.add_argument("--no-auto-train", action="store_true", help="Disable auto-train when checkpoint missing.")
-    parser.add_argument("--mc-samples", type=int, default=None, help="Override M_mc_test for prediction runs.")
-    args = parser.parse_args()
-
-    target_date = pd.Timestamp(args.target)
-    df = _prepare_df_from_parquet(args.data)
-
-    cfg = ManagerConfig(hidden_size=args.hidden)
-    manager = MultiScaleModelManager(checkpoint_dir=args.checkpoints, cfg=cfg)
-    if args.mc_samples is not None:
-        manager.cfg.M_mc_test = args.mc_samples
-
-    zones = args.zones if args.zones else sorted(df["PULocationID"].unique().tolist())
-    results = []
-    for zid in zones:
-        try:
-            pred = manager.train_and_predict_if_needed(df, zid, target_date, auto_train=not args.no_auto_train)
-            results.append({"PULocationID": zid, "Prediction": pred})
-            print(f"Zone {zid}: Prediction @ {target_date} = {pred:.4f}")
-        except Exception as exc:
-            print(f"Zone {zid}: skipped due to error -> {exc}")
-
-    if results:
-        out_csv = Path(args.checkpoints) / f"predictions_{target_date.strftime('%Y%m%d_%H%M')}.csv"
-        out_csv.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(results).to_csv(out_csv, index=False)
-        print(f"Saved predictions to {out_csv}")
+# def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
+#     cols = ["pickup_datetime", "PULocationID"]
+#     df = pd.read_parquet(parquet_path, columns=cols)
+#     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
+#     df["datetime"] = df["pickup_datetime"].dt.floor("H")
+#     return df
+#
+#
+# if __name__ == "__main__":
+#     import argparse
+#
+#     parser = argparse.ArgumentParser(description="Incremental multiscale forecasting with confidence weighting.")
+#     parser.add_argument("--data", type=str, default="data.parquet", help="Input parquet file path.")
+#     parser.add_argument("--target", type=str, default="2021-03-05 12:00", help="Target timestamp (YYYY-mm-dd HH:MM)")
+#     parser.add_argument("--hidden", type=int, default=64, help="Hidden size for the model.")
+#     parser.add_argument("--checkpoints", type=str, default="checkpoints_multiscale", help="Checkpoint directory.")
+#     parser.add_argument("--zones", type=int, nargs="*", default=None, help="Optional list of PULocationID to process.")
+#     parser.add_argument("--no-auto-train", action="store_true", help="Disable auto-train when checkpoint missing.")
+#     parser.add_argument("--mc-samples", type=int, default=None, help="Override M_mc_test for prediction runs.")
+#     args = parser.parse_args()
+#
+#     target_date = pd.Timestamp(args.target)
+#     df = _prepare_df_from_parquet(args.data)
+#
+#     cfg = ManagerConfig(hidden_size=args.hidden)
+#     manager = MultiScaleModelManager(checkpoint_dir=args.checkpoints, cfg=cfg)
+#     if args.mc_samples is not None:
+#         manager.cfg.M_mc_test = args.mc_samples
+#
+#     zones = args.zones if args.zones else sorted(df["PULocationID"].unique().tolist())
+#     results = []
+#     for zid in zones:
+#         try:
+#             pred = manager.train_and_predict_if_needed(df, zid, target_date, auto_train=not args.no_auto_train)
+#             results.append({"PULocationID": zid, "Prediction": pred})
+#             print(f"Zone {zid}: Prediction @ {target_date} = {pred:.4f}")
+#         except Exception as exc:
+#             print(f"Zone {zid}: skipped due to error -> {exc}")
+#
+#     if results:
+#         out_csv = Path(args.checkpoints) / f"predictions_{target_date.strftime('%Y%m%d_%H%M')}.csv"
+#         out_csv.parent.mkdir(parents=True, exist_ok=True)
+#         pd.DataFrame(results).to_csv(out_csv, index=False)
+#         print(f"Saved predictions to {out_csv}")
