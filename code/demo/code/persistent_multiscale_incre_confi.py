@@ -531,39 +531,4 @@ def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
     return df
 
 
-if __name__ == "__main__":
-    import argparse
 
-    parser = argparse.ArgumentParser(description="Incremental multiscale forecasting with confidence weighting.")
-    parser.add_argument("--data", type=str, default="data.parquet", help="Input parquet file path.")
-    parser.add_argument("--target", type=str, default="2021-03-05 12:00", help="Target timestamp (YYYY-mm-dd HH:MM)")
-    parser.add_argument("--hidden", type=int, default=64, help="Hidden size for the model.")
-    parser.add_argument("--checkpoints", type=str, default="checkpoints_multiscale", help="Checkpoint directory.")
-    parser.add_argument("--zones", type=int, nargs="*", default=None, help="Optional list of PULocationID to process.")
-    parser.add_argument("--no-auto-train", action="store_true", help="Disable auto-train when checkpoint missing.")
-    parser.add_argument("--mc-samples", type=int, default=None, help="Override M_mc_test for prediction runs.")
-    args = parser.parse_args()
-
-    target_date = pd.Timestamp(args.target)
-    df = _prepare_df_from_parquet(args.data)
-
-    cfg = ManagerConfig(hidden_size=args.hidden)
-    manager = MultiScaleModelManager(checkpoint_dir=args.checkpoints, cfg=cfg)
-    if args.mc_samples is not None:
-        manager.cfg.M_mc_test = args.mc_samples
-
-    zones = args.zones if args.zones else sorted(df["PULocationID"].unique().tolist())
-    results = []
-    for zid in zones:
-        try:
-            pred = manager.train_and_predict_if_needed(df, zid, target_date, auto_train=not args.no_auto_train)
-            results.append({"PULocationID": zid, "Prediction": pred})
-            print(f"Zone {zid}: Prediction @ {target_date} = {pred:.4f}")
-        except Exception as exc:
-            print(f"Zone {zid}: skipped due to error -> {exc}")
-
-    if results:
-        out_csv = Path(args.checkpoints) / f"predictions_{target_date.strftime('%Y%m%d_%H%M')}.csv"
-        out_csv.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(results).to_csv(out_csv, index=False)
-        print(f"Saved predictions to {out_csv}")
