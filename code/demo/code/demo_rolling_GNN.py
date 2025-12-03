@@ -35,7 +35,6 @@ CHECKPOINT_DIR = "checkpoints_multiscale"
 
 START_TARGET = pd.Timestamp("2021-03-05 00:00")
 ROLLING_STEPS = 24
-HIDDEN_SIZE = 64
 # EXCLUDED_ZONES = [1,2,3,4,5,6,100]
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
@@ -265,7 +264,7 @@ def run_rolling_with_gnn(
         if RETRAIN_EACH_HOUR:
             hour_dir = Path(CHECKPOINT_DIR) / target_ts.strftime("%Y%m%d_%H%M")
             hour_dir.mkdir(parents=True, exist_ok=True)
-            cfg = ManagerConfig(hidden_size=HIDDEN_SIZE, M_mc_test=MC_DROPOUT_SAMPLES)
+            cfg = ManagerConfig(M_mc_test=MC_DROPOUT_SAMPLES)
             mgr = MultiScaleModelManager(checkpoint_dir=str(hour_dir), cfg=cfg)
         else:
             mgr = manager
@@ -417,7 +416,7 @@ def main() -> None:
     lookup_df = _load_zone_lookup(LOOKUP_PATH)
     adjacency = _build_zone_adjacency(EDGE_WEIGHT_MATRIX, lookup_df)
     zone_hourly_counts = _build_zone_hourly_counts(df)
-    cfg = ManagerConfig(hidden_size=HIDDEN_SIZE, M_mc_test=MC_DROPOUT_SAMPLES)
+    cfg = ManagerConfig(M_mc_test=MC_DROPOUT_SAMPLES)
     manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
 
     run_rolling_with_gnn(df, manager, device, prior_scores, adjacency, zone_hourly_counts)

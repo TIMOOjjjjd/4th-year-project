@@ -210,7 +210,7 @@ class MultiScaleModelManager:
         """Return dense hourly counts from [end_inclusive - sequence_length, end_inclusive]."""
         assert {"datetime", "PULocationID"} <= set(df.columns)
 
-        start_date = end_inclusive - pd.Timedelta(hours=self.cfg.sequence_length)
+        start_date = end_inclusive - pd.Timedelta(hours=800)
         zone_df = df[df["PULocationID"] == zone_id].copy()
         hourly = zone_df.groupby("datetime").size().reset_index(name="passenger_count")
 
