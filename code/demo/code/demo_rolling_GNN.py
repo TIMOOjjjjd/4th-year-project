@@ -9,8 +9,8 @@ import pandas as pd
 import torch
 
 from gnn_model import run_gnn_pipeline
-from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager
-# from persistent_multiscale_incremental import MultiScaleModelManager, ManagerConfig  # ⚠️ 改成你自己的模块路径
+# from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager
+from persistent_multiscale_confi import MultiScaleModelManager, ManagerConfig
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 # # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
