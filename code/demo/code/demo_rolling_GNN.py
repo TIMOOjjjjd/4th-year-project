@@ -39,6 +39,8 @@ ROLLING_STEPS = 24
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
 MC_DROPOUT_SAMPLES = 10
+CONFIDENCE_LEVELS = [0.5, 0.7, 0.9, 0.95]
+PEAK_HOURS = {7, 8, 9, 16, 17, 18, 19}
 # =====================================================
 
 HISTORY_WINDOWS = {
@@ -242,6 +244,80 @@ def _assign_confidence_scores(
     return zone_confidence
 
 
+def _normal_cdf(z: np.ndarray) -> np.ndarray:
+    z_t = torch.tensor(z, dtype=torch.float32)
+    return (0.5 * (1.0 + torch.erf(z_t / np.sqrt(2.0)))).numpy()
+
+
+def _normal_pdf(z: np.ndarray) -> np.ndarray:
+    z_t = torch.tensor(z, dtype=torch.float32)
+    return (torch.exp(-0.5 * z_t**2) / np.sqrt(2.0 * np.pi)).numpy()
+
+
+def _normal_quantile(prob: float) -> float:
+    prob_t = torch.tensor(prob, dtype=torch.float32)
+    return float(torch.distributions.Normal(0.0, 1.0).icdf(prob_t))
+
+
+def _compute_uncertainty_metrics(
+    df: pd.DataFrame,
+    confidence_levels: List[float],
+    subset_label: str,
+) -> Dict[str, pd.DataFrame]:
+    valid = df.dropna(subset=["y_pred", "y_true", "mc_std"]).copy()
+    valid = valid[np.isfinite(valid["mc_std"]) & (valid["mc_std"] > 0)]
+    if valid.empty:
+        return {
+            "reliability": pd.DataFrame(),
+            "summary": pd.DataFrame(),
+        }
+
+    mu = valid["y_pred"].to_numpy(dtype=float)
+    y = valid["y_true"].to_numpy(dtype=float)
+    sigma = np.clip(valid["mc_std"].to_numpy(dtype=float), 1e-6, None)
+
+    nll = 0.5 * np.log(2.0 * np.pi * sigma**2) + ((y - mu) ** 2) / (2.0 * sigma**2)
+    z = (y - mu) / sigma
+    cdf = _normal_cdf(z)
+    pdf = _normal_pdf(z)
+    crps = sigma * (z * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / np.sqrt(np.pi))
+
+    reliability_rows: List[Dict[str, float]] = []
+    for level in confidence_levels:
+        z_val = _normal_quantile((1.0 + level) / 2.0)
+        lower = mu - z_val * sigma
+        upper = mu + z_val * sigma
+        picp = float(np.mean((y >= lower) & (y <= upper)))
+        mpiw = float(np.mean(upper - lower))
+        reliability_rows.append(
+            {
+                "subset": subset_label,
+                "level": float(level),
+                "picp": picp,
+                "mpiw": mpiw,
+                "count": float(len(y)),
+            }
+        )
+
+    reliability_df = pd.DataFrame(reliability_rows)
+    ece = float(np.mean(np.abs(reliability_df["picp"] - reliability_df["level"])))
+    summary_df = pd.DataFrame(
+        [
+            {
+                "subset": subset_label,
+                "nll": float(np.mean(nll)),
+                "crps": float(np.mean(crps)),
+                "ece": ece,
+                "count": float(len(y)),
+            }
+        ]
+    )
+    return {
+        "reliability": reliability_df,
+        "summary": summary_df,
+    }
+
+
 def run_rolling_with_gnn(
     df: pd.DataFrame,
     manager: MultiScaleModelManager,
@@ -399,6 +475,31 @@ def run_rolling_with_gnn(
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
+
+    baseline_df["is_peak"] = baseline_df["target_hour"].dt.hour.isin(PEAK_HOURS)
+    overall_metrics = _compute_uncertainty_metrics(
+        baseline_df, CONFIDENCE_LEVELS, subset_label="overall"
+    )
+    peak_metrics = _compute_uncertainty_metrics(
+        baseline_df[baseline_df["is_peak"]], CONFIDENCE_LEVELS, subset_label="peak"
+    )
+    offpeak_metrics = _compute_uncertainty_metrics(
+        baseline_df[~baseline_df["is_peak"]], CONFIDENCE_LEVELS, subset_label="offpeak"
+    )
+
+    reliability_df = pd.concat(
+        [overall_metrics["reliability"], peak_metrics["reliability"], offpeak_metrics["reliability"]],
+        ignore_index=True,
+    )
+    summary_df = pd.concat(
+        [overall_metrics["summary"], peak_metrics["summary"], offpeak_metrics["summary"]],
+        ignore_index=True,
+    )
+
+    if not reliability_df.empty:
+        reliability_df.to_csv("uncertainty_reliability.csv", index=False)
+    if not summary_df.empty:
+        summary_df.to_csv("uncertainty_summary.csv", index=False)
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
