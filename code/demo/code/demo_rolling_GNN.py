@@ -39,6 +39,7 @@ ROLLING_STEPS = 24
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
 MC_DROPOUT_SAMPLES = 10
+PICP_ALPHA = 0.1
 # =====================================================
 
 HISTORY_WINDOWS = {
@@ -311,6 +312,8 @@ def run_rolling_with_gnn(
 
         step_df = pd.DataFrame(step_records)
         step_df["target_hour"] = target_ts
+        step_df["pi_lower"] = np.nan
+        step_df["pi_upper"] = np.nan
         zone_confidence = _assign_confidence_scores(step_df, prior_scores, adjacency)
         baseline_records.append(step_df)
 
@@ -318,11 +321,21 @@ def run_rolling_with_gnn(
         if mask.any():
             preds = step_df.loc[mask, "y_pred"].values
             trues = step_df.loc[mask, "y_true"].values
+            residuals = trues - preds
+            q_low, q_high = np.quantile(
+                residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
+            )
+            step_df.loc[mask, "pi_lower"] = step_df.loc[mask, "y_pred"] + q_low
+            step_df.loc[mask, "pi_upper"] = step_df.loc[mask, "y_pred"] + q_high
             mae = float(np.mean(np.abs(preds - trues)))
             rmse = float(np.sqrt(np.mean((preds - trues) ** 2)))
+            lower = step_df.loc[mask, "pi_lower"].values
+            upper = step_df.loc[mask, "pi_upper"].values
+            picp = float(np.mean((trues >= lower) & (trues <= upper)))
         else:
             mae = float("nan")
             rmse = float("nan")
+            picp = float("nan")
 
         baseline_metrics.append(
             {
@@ -330,6 +343,7 @@ def run_rolling_with_gnn(
                 "MAE": mae,
                 "RMSE": rmse,
                 "mean_true": float(step_df.loc[mask, "y_true"].mean()) if mask.any() else float("nan"),
+                "PICP": picp,
             }
         )
 
@@ -351,7 +365,44 @@ def run_rolling_with_gnn(
             show_plots=False,
         )
         gnn_output_df["target_hour"] = target_ts
+        gnn_output_df["gru_pi_lower"] = np.nan
+        gnn_output_df["gru_pi_upper"] = np.nan
+        gnn_output_df["gnn_pi_lower"] = np.nan
+        gnn_output_df["gnn_pi_upper"] = np.nan
         gnn_records.append(gnn_output_df)
+
+        gnn_mask = gnn_output_df[["True_Value", "GRU_Pred", "Refined_Pred"]].notna().all(axis=1)
+        if gnn_mask.any():
+            true_vals = gnn_output_df.loc[gnn_mask, "True_Value"].values
+            gru_residuals = true_vals - gnn_output_df.loc[gnn_mask, "GRU_Pred"].values
+            gnn_residuals = true_vals - gnn_output_df.loc[gnn_mask, "Refined_Pred"].values
+            gru_q_low, gru_q_high = np.quantile(
+                gru_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
+            )
+            gnn_q_low, gnn_q_high = np.quantile(
+                gnn_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
+            )
+            gnn_output_df.loc[gnn_mask, "gru_pi_lower"] = (
+                gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_low
+            )
+            gnn_output_df.loc[gnn_mask, "gru_pi_upper"] = (
+                gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_high
+            )
+            gnn_output_df.loc[gnn_mask, "gnn_pi_lower"] = (
+                gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_low
+            )
+            gnn_output_df.loc[gnn_mask, "gnn_pi_upper"] = (
+                gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_high
+            )
+            gru_lower = gnn_output_df.loc[gnn_mask, "gru_pi_lower"].values
+            gru_upper = gnn_output_df.loc[gnn_mask, "gru_pi_upper"].values
+            gnn_lower = gnn_output_df.loc[gnn_mask, "gnn_pi_lower"].values
+            gnn_upper = gnn_output_df.loc[gnn_mask, "gnn_pi_upper"].values
+            picp_gru = float(np.mean((true_vals >= gru_lower) & (true_vals <= gru_upper)))
+            picp_gnn = float(np.mean((true_vals >= gnn_lower) & (true_vals <= gnn_upper)))
+        else:
+            picp_gru = float("nan")
+            picp_gnn = float("nan")
 
         gnn_metrics.append(
             {
@@ -360,6 +411,8 @@ def run_rolling_with_gnn(
                 "MSE_GRU": gnn_metric["mse_gru"],
                 "MAE_GNN": gnn_metric["mae_refined"],
                 "MSE_GNN": gnn_metric["mse_refined"],
+                "PICP_GRU": picp_gru,
+                "PICP_GNN": picp_gnn,
             }
         )
 
@@ -378,9 +431,16 @@ def run_rolling_with_gnn(
     if not valid_baseline.empty:
         overall_mae = float(np.mean(np.abs(valid_baseline["y_pred"] - valid_baseline["y_true"])))
         overall_rmse = float(np.sqrt(np.mean((valid_baseline["y_pred"] - valid_baseline["y_true"]) ** 2)))
+        overall_picp = float(
+            np.mean(
+                (valid_baseline["y_true"] >= valid_baseline["pi_lower"])
+                & (valid_baseline["y_true"] <= valid_baseline["pi_upper"])
+            )
+        )
     else:
         overall_mae = float("nan")
         overall_rmse = float("nan")
+        overall_picp = float("nan")
 
     valid_gnn = gnn_df.dropna(subset=["Refined_Pred", "True_Value"]) if not gnn_df.empty else pd.DataFrame()
     if not valid_gnn.empty:
@@ -390,18 +450,38 @@ def run_rolling_with_gnn(
         overall_rmse_gnn = float(
             np.sqrt(np.mean((valid_gnn["Refined_Pred"] - valid_gnn["True_Value"]) ** 2))
         )
+        overall_picp_gru = float(
+            np.mean(
+                (valid_gnn["True_Value"] >= valid_gnn["gru_pi_lower"])
+                & (valid_gnn["True_Value"] <= valid_gnn["gru_pi_upper"])
+            )
+        )
+        overall_picp_gnn = float(
+            np.mean(
+                (valid_gnn["True_Value"] >= valid_gnn["gnn_pi_lower"])
+                & (valid_gnn["True_Value"] <= valid_gnn["gnn_pi_upper"])
+            )
+        )
     else:
         overall_mae_gnn = float("nan")
         overall_rmse_gnn = float("nan")
+        overall_picp_gru = float("nan")
+        overall_picp_gnn = float("nan")
 
     with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
+        fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
+        fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
+        fh.write(f"GNN PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gnn}\n")
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
+    print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
+    print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
+    print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")
 
 
 def main() -> None:
