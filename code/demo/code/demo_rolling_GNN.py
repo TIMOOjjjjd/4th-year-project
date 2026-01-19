@@ -3,6 +3,7 @@ import shutil
 import warnings
 from pathlib import Path
 from typing import Dict, List
+from scipy.special import erf
 
 import numpy as np
 import pandas as pd
@@ -295,6 +296,19 @@ def _confidence_error_correlation(df: pd.DataFrame) -> float:
     return float(np.corrcoef(conf, abs_error)[0, 1])
 
 
+def _gaussian_nll_crps(
+    y_true: np.ndarray, y_pred: np.ndarray, std: np.ndarray, eps: float = 1e-6
+) -> Dict[str, float]:
+    sigma = np.maximum(std, eps)
+    z = (y_true - y_pred) / sigma
+    nll = 0.5 * np.log(2.0 * np.pi * sigma**2) + 0.5 * z**2
+
+    pdf = (1.0 / np.sqrt(2.0 * np.pi)) * np.exp(-0.5 * z**2)
+    cdf = 0.5 * (1.0 + erf(z / np.sqrt(2.0)))
+    crps = sigma * (z * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / np.sqrt(np.pi))
+    return {"nll": float(np.mean(nll)), "crps": float(np.mean(crps))}
+
+
 def _is_monotonic_nonincreasing(values: np.ndarray) -> bool:
     if values.size < 2:
         return True
@@ -403,6 +417,7 @@ def run_rolling_with_gnn(
         if mask.any():
             preds = step_df.loc[mask, "y_pred"].values
             trues = step_df.loc[mask, "y_true"].values
+            stds = step_df.loc[mask, "mc_std"].values
             residuals = trues - preds
             q_low, q_high = np.quantile(
                 residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
@@ -414,10 +429,20 @@ def run_rolling_with_gnn(
             lower = step_df.loc[mask, "pi_lower"].values
             upper = step_df.loc[mask, "pi_upper"].values
             picp = float(np.mean((trues >= lower) & (trues <= upper)))
+            valid_std = np.isfinite(stds) & (stds > 0.0)
+            if np.any(valid_std):
+                nll_crps = _gaussian_nll_crps(trues[valid_std], preds[valid_std], stds[valid_std])
+                nll = nll_crps["nll"]
+                crps = nll_crps["crps"]
+            else:
+                nll = float("nan")
+                crps = float("nan")
         else:
             mae = float("nan")
             rmse = float("nan")
             picp = float("nan")
+            nll = float("nan")
+            crps = float("nan")
 
         baseline_metrics.append(
             {
@@ -426,6 +451,8 @@ def run_rolling_with_gnn(
                 "RMSE": rmse,
                 "mean_true": float(step_df.loc[mask, "y_true"].mean()) if mask.any() else float("nan"),
                 "PICP": picp,
+                "NLL": nll,
+                "CRPS": crps,
             }
         )
 
@@ -539,10 +566,25 @@ def run_rolling_with_gnn(
                 & (valid_baseline["y_true"] <= valid_baseline["pi_upper"])
             )
         )
+        valid_std = valid_baseline["mc_std"].to_numpy()
+        valid_std_mask = np.isfinite(valid_std) & (valid_std > 0.0)
+        if np.any(valid_std_mask):
+            nll_crps = _gaussian_nll_crps(
+                valid_baseline.loc[valid_std_mask, "y_true"].to_numpy(),
+                valid_baseline.loc[valid_std_mask, "y_pred"].to_numpy(),
+                valid_std[valid_std_mask],
+            )
+            overall_nll = nll_crps["nll"]
+            overall_crps = nll_crps["crps"]
+        else:
+            overall_nll = float("nan")
+            overall_crps = float("nan")
     else:
         overall_mae = float("nan")
         overall_rmse = float("nan")
         overall_picp = float("nan")
+        overall_nll = float("nan")
+        overall_crps = float("nan")
 
     valid_gnn = gnn_df.dropna(subset=["Refined_Pred", "True_Value"]) if not gnn_df.empty else pd.DataFrame()
     if not valid_gnn.empty:
@@ -574,6 +616,8 @@ def run_rolling_with_gnn(
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
+        fh.write(f"Baseline NLL: {overall_nll}\n")
+        fh.write(f"Baseline CRPS: {overall_crps}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
         fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
@@ -581,6 +625,7 @@ def run_rolling_with_gnn(
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
+    print(f"🎯 Baseline NLL={overall_nll:.4f}, CRPS={overall_crps:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
     print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
     print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")

@@ -124,6 +124,17 @@ class MultiScaleModel(nn.Module):
         preds = torch.cat(preds, dim=0)
         return preds.mean(dim=0), preds.std(dim=0)
 
+    def mc_predict_samples(self, x: Dict[str, torch.Tensor], M: int) -> torch.Tensor:
+        """Return raw MC Dropout predictions in scaled space with shape [M, B, 1]."""
+        self.train()
+        preds = []
+        with torch.no_grad():
+            M = max(1, int(M))
+            for _ in range(M):
+                y_main, _ = self.forward(x)
+                preds.append(y_main.unsqueeze(0))
+        return torch.cat(preds, dim=0)
+
 
 @dataclass
 class ManagerConfig:
@@ -421,6 +432,25 @@ class MultiScaleModelManager:
         }
         return float(point), std_orig, branch_var
 
+    def predict_with_samples(
+        self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp, M: Optional[int] = None
+    ) -> np.ndarray:
+        if not self.has_checkpoint(zone_id):
+            raise FileNotFoundError(f"Zone {zone_id} has no checkpoint; train first.")
+
+        model, _ = self._load(zone_id)
+        context_end = target_date - self._forecast_delta
+        hourly = self._prepare_zone_series(df, zone_id, end_inclusive=context_end)
+        scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
+        X_last = self._build_inference_window(hourly, scaler, context_end)
+
+        sample_count = self.cfg.M_mc_test if M is None else int(M)
+        with torch.no_grad():
+            preds_scaled = model.mc_predict_samples(X_last, sample_count)
+        preds_np = preds_scaled.cpu().numpy().reshape(sample_count, -1)
+        preds = scaler.inverse_transform(preds_np)
+        return preds[:, 0]
+
     # ---------- orchestration ----------
     def train_and_predict_if_needed(
         self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp, auto_train: bool = True
@@ -449,5 +479,3 @@ def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
     df["datetime"] = df["pickup_datetime"].dt.floor("H")
     return df
-
-
