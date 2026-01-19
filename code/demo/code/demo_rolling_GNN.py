@@ -34,7 +34,7 @@ EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
 CHECKPOINT_DIR = "checkpoints_multiscale"
 
 START_TARGET = pd.Timestamp("2021-03-05 00:00")
-ROLLING_STEPS = 24
+ROLLING_STEPS = 1
 # EXCLUDED_ZONES = [1,2,3,4,5,6,100]
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
@@ -243,6 +243,86 @@ def _assign_confidence_scores(
     return zone_confidence
 
 
+def _compute_confidence_calibration(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
+    required_cols = ["confidence", "y_pred", "y_true"]
+    valid = df.dropna(subset=required_cols).copy()
+    if valid.empty:
+        return pd.DataFrame()
+
+    valid["confidence"] = valid["confidence"].clip(0.0, 1.0)
+    valid["abs_error"] = (valid["y_true"] - valid["y_pred"]).abs()
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    valid["conf_bin"] = pd.cut(valid["confidence"], bins=bins, include_lowest=True, right=True)
+
+    rows = []
+    for interval, group in valid.groupby("conf_bin", observed=True):
+        if group.empty:
+            continue
+        rmse = float(np.sqrt(np.mean((group["y_true"] - group["y_pred"]) ** 2)))
+        coverage = float("nan")
+        if {"pi_lower", "pi_upper"}.issubset(group.columns):
+            cov_mask = group[["pi_lower", "pi_upper", "y_true"]].notna().all(axis=1)
+            if cov_mask.any():
+                lower = group.loc[cov_mask, "pi_lower"].to_numpy()
+                upper = group.loc[cov_mask, "pi_upper"].to_numpy()
+                true_vals = group.loc[cov_mask, "y_true"].to_numpy()
+                coverage = float(np.mean((true_vals >= lower) & (true_vals <= upper)))
+        rows.append(
+            {
+                "bin_left": float(interval.left),
+                "bin_right": float(interval.right),
+                "count": int(len(group)),
+                "mean_confidence": float(group["confidence"].mean()),
+                "mae": float(group["abs_error"].mean()),
+                "rmse": rmse,
+                "coverage": coverage,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _confidence_error_correlation(df: pd.DataFrame) -> float:
+    required_cols = ["confidence", "y_pred", "y_true"]
+    valid = df.dropna(subset=required_cols).copy()
+    if len(valid) < 2:
+        return float("nan")
+
+    valid["confidence"] = valid["confidence"].clip(0.0, 1.0)
+    abs_error = (valid["y_true"] - valid["y_pred"]).abs().to_numpy()
+    conf = valid["confidence"].to_numpy()
+    if np.std(conf) == 0.0 or np.std(abs_error) == 0.0:
+        return float("nan")
+    return float(np.corrcoef(conf, abs_error)[0, 1])
+
+
+def _is_monotonic_nonincreasing(values: np.ndarray) -> bool:
+    if values.size < 2:
+        return True
+    diffs = np.diff(values)
+    return bool(np.all(diffs <= 1e-12))
+
+
+def _confidence_bin_monotonicity(
+    calibration_df: pd.DataFrame,
+) -> Dict[str, object]:
+    if calibration_df.empty:
+        return {"mae_nonincreasing": float("nan"), "coverage_nonincreasing": float("nan")}
+
+    ordered = calibration_df.sort_values("bin_left").reset_index(drop=True)
+    mae_vals = ordered["mae"].dropna().to_numpy()
+    coverage_vals = ordered["coverage"].dropna().to_numpy()
+
+    mae_monotonic = _is_monotonic_nonincreasing(mae_vals)
+    if coverage_vals.size:
+        coverage_monotonic = _is_monotonic_nonincreasing(coverage_vals)
+    else:
+        coverage_monotonic = float("nan")
+    return {
+        "mae_nonincreasing": mae_monotonic,
+        "coverage_nonincreasing": coverage_monotonic,
+    }
+
+
 def run_rolling_with_gnn(
     df: pd.DataFrame,
     manager: MultiScaleModelManager,
@@ -252,6 +332,8 @@ def run_rolling_with_gnn(
     zone_hourly_counts: pd.Series,
 ) -> None:
     zones = sorted(df["PULocationID"].unique())
+
+    zones = zones[:20]
 
     baseline_records: List[pd.DataFrame] = []
     gnn_records: List[pd.DataFrame] = []
@@ -426,6 +508,26 @@ def run_rolling_with_gnn(
     if not gnn_df.empty:
         gnn_df.to_csv("gnn_refined_predictions.csv", index=False)
     gnn_metrics_df.to_csv("hourly_metrics_gnn.csv", index=False)
+
+    calibration_df = _compute_confidence_calibration(baseline_df, n_bins=5)
+    confidence_corr = _confidence_error_correlation(baseline_df)
+    monotonicity = _confidence_bin_monotonicity(calibration_df)
+    if not calibration_df.empty:
+        calibration_df.to_csv("confidence_calibration.csv", index=False)
+        with open("confidence_calibration.txt", "w", encoding="utf-8") as fh:
+            fh.write(f"Confidence vs abs error correlation: {confidence_corr}\n")
+            fh.write(
+                "Binned monotonicity (non-increasing with confidence): "
+                f"mae={monotonicity['mae_nonincreasing']}, "
+                f"coverage={monotonicity['coverage_nonincreasing']}\n"
+            )
+    print(f"📊 Confidence vs abs error correlation: {confidence_corr}")
+    if not calibration_df.empty:
+        print(
+            "📊 Binned monotonicity (non-increasing with confidence): "
+            f"mae={monotonicity['mae_nonincreasing']}, "
+            f"coverage={monotonicity['coverage_nonincreasing']}"
+        )
 
     valid_baseline = baseline_df.dropna(subset=["y_pred", "y_true"])
     if not valid_baseline.empty:
