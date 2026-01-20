@@ -309,6 +309,21 @@ def _gaussian_nll_crps(
     return {"nll": float(np.mean(nll)), "crps": float(np.mean(crps))}
 
 
+def _sigma_from_quantiles(q_low: np.ndarray, q_high: np.ndarray, alpha: float) -> np.ndarray:
+    """Assume central (1-alpha) Normal interval to approximate sigma.
+    sigma ≈ (q_high - q_low) / (2 * z_{1-alpha/2}).
+    """
+    try:
+        from scipy.stats import norm
+        z = float(norm.ppf(1.0 - alpha / 2.0))
+    except Exception:
+        z = 1.6448536269514722  # fallback for alpha=0.1 (~90% interval)
+    width = np.maximum(q_high - q_low, 0.0)
+    denom = max(2.0 * z, 1e-6)
+    sigma = width / denom
+    return np.maximum(sigma, 1e-6)
+
+
 def _is_monotonic_nonincreasing(values: np.ndarray) -> bool:
     if values.size < 2:
         return True
@@ -606,11 +621,27 @@ def run_rolling_with_gnn(
                 & (valid_gnn["True_Value"] <= valid_gnn["gnn_pi_upper"])
             )
         )
+        # GNN(MC-approx) 概率指标：用GNN区间反推sigma并计算NLL/CRPS（不覆盖原有结果）
+        gmask = valid_gnn[["Refined_Pred", "True_Value", "gnn_pi_lower", "gnn_pi_upper"]].notna().all(axis=1)
+        if gmask.any():
+            mu_g = valid_gnn.loc[gmask, "Refined_Pred"].to_numpy(dtype=float)
+            y_g = valid_gnn.loc[gmask, "True_Value"].to_numpy(dtype=float)
+            ql_g = valid_gnn.loc[gmask, "gnn_pi_lower"].to_numpy(dtype=float)
+            qh_g = valid_gnn.loc[gmask, "gnn_pi_upper"].to_numpy(dtype=float)
+            sigma_g = _sigma_from_quantiles(ql_g, qh_g, PICP_ALPHA)
+            gnn_mc_res = _gaussian_nll_crps(y_g, mu_g, sigma_g)
+            overall_nll_gnn_mc = float(gnn_mc_res["nll"])
+            overall_crps_gnn_mc = float(gnn_mc_res["crps"])
+        else:
+            overall_nll_gnn_mc = float("nan")
+            overall_crps_gnn_mc = float("nan")
     else:
         overall_mae_gnn = float("nan")
         overall_rmse_gnn = float("nan")
         overall_picp_gru = float("nan")
         overall_picp_gnn = float("nan")
+        overall_nll_gnn_mc = float("nan")
+        overall_crps_gnn_mc = float("nan")
 
     with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
         fh.write(f"Baseline MAE: {overall_mae}\n")
@@ -622,6 +653,8 @@ def run_rolling_with_gnn(
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
         fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
         fh.write(f"GNN PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gnn}\n")
+        fh.write(f"GNN(MC-approx) NLL: {overall_nll_gnn_mc}\n")
+        fh.write(f"GNN(MC-approx) CRPS: {overall_crps_gnn_mc}\n")
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
@@ -629,6 +662,7 @@ def run_rolling_with_gnn(
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
     print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
     print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")
+    print(f"🎯 GNN(MC-approx) NLL={overall_nll_gnn_mc:.4f}, CRPS={overall_crps_gnn_mc:.4f}")
 
 
 def main() -> None:
