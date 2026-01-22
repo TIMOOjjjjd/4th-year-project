@@ -41,6 +41,7 @@ EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
 MC_DROPOUT_SAMPLES = 10
 PICP_ALPHA = 0.1
+PICP_ALPHAS = [0.05, 0.1, 0.2, 0.3, 0.4]
 # =====================================================
 
 HISTORY_WINDOWS = {
@@ -307,6 +308,40 @@ def _gaussian_nll_crps(
     cdf = 0.5 * (1.0 + erf(z / np.sqrt(2.0)))
     crps = sigma * (z * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / np.sqrt(np.pi))
     return {"nll": float(np.mean(nll)), "crps": float(np.mean(crps))}
+
+
+def _compute_picp_curve(
+    y_true: np.ndarray, y_pred: np.ndarray, alphas: List[float]
+) -> pd.DataFrame:
+    if y_true.size == 0 or y_pred.size == 0:
+        return pd.DataFrame()
+
+    residuals = y_true - y_pred
+    rows = []
+    for alpha in alphas:
+        if not 0.0 < alpha < 1.0:
+            continue
+        q_low, q_high = np.quantile(residuals, [alpha / 2.0, 1.0 - alpha / 2.0])
+        lower = y_pred + q_low
+        upper = y_pred + q_high
+        coverage = float(np.mean((y_true >= lower) & (y_true <= upper)))
+        rows.append(
+            {
+                "alpha": float(alpha),
+                "expected_coverage": float(1.0 - alpha),
+                "observed_coverage": coverage,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _ece_ace_from_curve(curve_df: pd.DataFrame) -> Dict[str, float]:
+    if curve_df.empty:
+        return {"ece": float("nan"), "ace": float("nan")}
+    gaps = np.abs(curve_df["observed_coverage"] - curve_df["expected_coverage"])
+    ace = float(np.mean(gaps))
+    ece = float(np.mean(gaps))
+    return {"ece": ece, "ace": ace}
 
 
 def _sigma_from_quantiles(q_low: np.ndarray, q_high: np.ndarray, alpha: float) -> np.ndarray:
@@ -601,6 +636,15 @@ def run_rolling_with_gnn(
         overall_nll = float("nan")
         overall_crps = float("nan")
 
+    baseline_curve = _compute_picp_curve(
+        valid_baseline["y_true"].to_numpy(),
+        valid_baseline["y_pred"].to_numpy(),
+        PICP_ALPHAS,
+    )
+    baseline_cal = _ece_ace_from_curve(baseline_curve)
+    if not baseline_curve.empty:
+        baseline_curve.to_csv("picp_curve_baseline.csv", index=False)
+
     valid_gnn = gnn_df.dropna(subset=["Refined_Pred", "True_Value"]) if not gnn_df.empty else pd.DataFrame()
     if not valid_gnn.empty:
         overall_mae_gnn = float(
@@ -643,26 +687,61 @@ def run_rolling_with_gnn(
         overall_nll_gnn_mc = float("nan")
         overall_crps_gnn_mc = float("nan")
 
+    gru_curve = pd.DataFrame()
+    gnn_curve = pd.DataFrame()
+    gru_cal = {"ece": float("nan"), "ace": float("nan")}
+    gnn_cal = {"ece": float("nan"), "ace": float("nan")}
+    if not valid_gnn.empty:
+        gmask_gru = valid_gnn[["GRU_Pred", "True_Value"]].notna().all(axis=1)
+        if gmask_gru.any():
+            gru_curve = _compute_picp_curve(
+                valid_gnn.loc[gmask_gru, "True_Value"].to_numpy(),
+                valid_gnn.loc[gmask_gru, "GRU_Pred"].to_numpy(),
+                PICP_ALPHAS,
+            )
+            gru_cal = _ece_ace_from_curve(gru_curve)
+            if not gru_curve.empty:
+                gru_curve.to_csv("picp_curve_gru.csv", index=False)
+        gmask_gnn = valid_gnn[["Refined_Pred", "True_Value"]].notna().all(axis=1)
+        if gmask_gnn.any():
+            gnn_curve = _compute_picp_curve(
+                valid_gnn.loc[gmask_gnn, "True_Value"].to_numpy(),
+                valid_gnn.loc[gmask_gnn, "Refined_Pred"].to_numpy(),
+                PICP_ALPHAS,
+            )
+            gnn_cal = _ece_ace_from_curve(gnn_curve)
+            if not gnn_curve.empty:
+                gnn_curve.to_csv("picp_curve_gnn.csv", index=False)
+
     with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
         fh.write(f"Baseline NLL: {overall_nll}\n")
         fh.write(f"Baseline CRPS: {overall_crps}\n")
+        fh.write(f"Baseline curve ECE: {baseline_cal['ece']}\n")
+        fh.write(f"Baseline curve ACE: {baseline_cal['ace']}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
         fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
         fh.write(f"GNN PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gnn}\n")
         fh.write(f"GNN(MC-approx) NLL: {overall_nll_gnn_mc}\n")
         fh.write(f"GNN(MC-approx) CRPS: {overall_crps_gnn_mc}\n")
+        fh.write(f"GRU curve ECE: {gru_cal['ece']}\n")
+        fh.write(f"GRU curve ACE: {gru_cal['ace']}\n")
+        fh.write(f"GNN curve ECE: {gnn_cal['ece']}\n")
+        fh.write(f"GNN curve ACE: {gnn_cal['ace']}\n")
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
     print(f"🎯 Baseline NLL={overall_nll:.4f}, CRPS={overall_crps:.4f}")
+    print(f"🎯 Baseline curve ECE={baseline_cal['ece']:.4f}, ACE={baseline_cal['ace']:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
     print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
     print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")
     print(f"🎯 GNN(MC-approx) NLL={overall_nll_gnn_mc:.4f}, CRPS={overall_crps_gnn_mc:.4f}")
+    print(f"🎯 GRU curve ECE={gru_cal['ece']:.4f}, ACE={gru_cal['ace']:.4f}")
+    print(f"🎯 GNN curve ECE={gnn_cal['ece']:.4f}, ACE={gnn_cal['ace']:.4f}")
 
 
 def main() -> None:
