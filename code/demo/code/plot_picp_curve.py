@@ -5,7 +5,7 @@ import pandas as pd
 
 
 CURVE_FILES = {
-    "Baseline (scaled)": "picp_curve_baseline_calibrated.csv",
+    "GRU stage (scaled)": "picp_curve_gru_stage_calibrated.csv",
     "GRU (scaled)": "picp_curve_gru_calibrated.csv",
     "GNN (scaled)": "picp_curve_gnn_calibrated.csv",
 }

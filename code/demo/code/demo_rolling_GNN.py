@@ -876,8 +876,8 @@ def run_rolling_with_gnn(
         std_lookup = baseline_df[["PULocationID", "target_hour", "mc_std"]]
         gnn_df = gnn_df.merge(std_lookup, on=["PULocationID", "target_hour"], how="left")
 
-    baseline_df.to_csv("predictions_rolling_mc.csv", index=False)
-    baseline_metrics_df.to_csv("hourly_metrics_gru.csv", index=False)
+    baseline_df.to_csv("predictions_gru_stage_mc.csv", index=False)
+    baseline_metrics_df.to_csv("hourly_metrics_gru_stage.csv", index=False)
     if not gnn_df.empty:
         gnn_df.to_csv("gnn_refined_predictions.csv", index=False)
     gnn_metrics_df.to_csv("hourly_metrics_gnn.csv", index=False)
@@ -980,9 +980,9 @@ def run_rolling_with_gnn(
     )
     baseline_cal = _ece_ace_from_curve(baseline_curve)
     if not baseline_curve_raw.empty:
-        baseline_curve_raw.to_csv("picp_curve_baseline_raw.csv", index=False)
+        baseline_curve_raw.to_csv("picp_curve_gru_stage_raw.csv", index=False)
     if not baseline_curve.empty:
-        baseline_curve.to_csv("picp_curve_baseline_calibrated.csv", index=False)
+        baseline_curve.to_csv("picp_curve_gru_stage_calibrated.csv", index=False)
 
     valid_gnn = (
         gnn_df.dropna(subset=["Refined_Pred", "True_Value", "mc_std"])
@@ -1106,15 +1106,15 @@ def run_rolling_with_gnn(
             f"Confidence weights (objective={CONF_OPTIMIZE_TARGET}): {best_conf_weights} "
             f"score={best_conf_score}\n"
         )
-        fh.write(f"Baseline MAE: {overall_mae}\n")
-        fh.write(f"Baseline RMSE: {overall_rmse}\n")
-        fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
-        fh.write(f"Baseline PICP_cal@{target_coverage:.2f}: {overall_picp_cal}\n")
-        fh.write(f"Baseline scale: {scale_baseline}\n")
-        fh.write(f"Baseline NLL: {overall_nll}\n")
-        fh.write(f"Baseline CRPS: {overall_crps}\n")
-        fh.write(f"Baseline curve ECE: {baseline_cal['ece']}\n")
-        fh.write(f"Baseline curve ACE: {baseline_cal['ace']}\n")
+        fh.write(f"GRU stage MAE: {overall_mae}\n")
+        fh.write(f"GRU stage RMSE: {overall_rmse}\n")
+        fh.write(f"GRU stage PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
+        fh.write(f"GRU stage PICP_cal@{target_coverage:.2f}: {overall_picp_cal}\n")
+        fh.write(f"GRU stage scale: {scale_baseline}\n")
+        fh.write(f"GRU stage NLL: {overall_nll}\n")
+        fh.write(f"GRU stage CRPS: {overall_crps}\n")
+        fh.write(f"GRU stage curve ECE: {baseline_cal['ece']}\n")
+        fh.write(f"GRU stage curve ACE: {baseline_cal['ace']}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
         fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
@@ -1132,12 +1132,12 @@ def run_rolling_with_gnn(
         f"\n🎯 Confidence weights (objective={CONF_OPTIMIZE_TARGET}): {best_conf_weights} "
         f"score={best_conf_score:.4f}"
     )
-    print(f"🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
-    print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
-    print(f"🎯 Baseline PICP_cal@{target_coverage:.2f}={overall_picp_cal:.4f}")
-    print(f"🎯 Baseline scale={scale_baseline:.4f}")
-    print(f"🎯 Baseline NLL={overall_nll:.4f}, CRPS={overall_crps:.4f}")
-    print(f"🎯 Baseline curve ECE={baseline_cal['ece']:.4f}, ACE={baseline_cal['ace']:.4f}")
+    print(f"🎯 GRU stage MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
+    print(f"🎯 GRU stage PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
+    print(f"🎯 GRU stage PICP_cal@{target_coverage:.2f}={overall_picp_cal:.4f}")
+    print(f"🎯 GRU stage scale={scale_baseline:.4f}")
+    print(f"🎯 GRU stage NLL={overall_nll:.4f}, CRPS={overall_crps:.4f}")
+    print(f"🎯 GRU stage curve ECE={baseline_cal['ece']:.4f}, ACE={baseline_cal['ace']:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
     print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
     print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")
