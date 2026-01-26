@@ -5,9 +5,9 @@ import pandas as pd
 
 
 CURVE_FILES = {
-    "Baseline": "picp_curve_baseline.csv",
-    "GRU": "picp_curve_gru.csv",
-    "GNN": "picp_curve_gnn.csv",
+    "Baseline (scaled)": "picp_curve_baseline_calibrated.csv",
+    "GRU (scaled)": "picp_curve_gru_calibrated.csv",
+    "GNN (scaled)": "picp_curve_gnn_calibrated.csv",
 }
 OUTPUT_PATH = "picp_reliability_diagram.png"
 

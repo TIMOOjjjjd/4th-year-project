@@ -2,7 +2,7 @@ import os
 import shutil
 import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from scipy.special import erf
 
 import numpy as np
@@ -359,6 +359,121 @@ def _sigma_from_quantiles(q_low: np.ndarray, q_high: np.ndarray, alpha: float) -
     return np.maximum(sigma, 1e-6)
 
 
+def _z_from_alpha(alpha: float) -> float:
+    try:
+        from scipy.stats import norm
+        return float(norm.ppf(1.0 - alpha / 2.0))
+    except Exception:
+        return 1.6448536269514722
+
+
+def _interval_coverage(
+    y_true: np.ndarray, y_pred: np.ndarray, std: np.ndarray, alpha: float, scale: float
+) -> float:
+    z = _z_from_alpha(alpha)
+    mask = np.isfinite(y_true) & np.isfinite(y_pred) & np.isfinite(std) & (std > 0.0)
+    if not np.any(mask):
+        return float("nan")
+    half_width = z * scale * std[mask]
+    lower = y_pred[mask] - half_width
+    upper = y_pred[mask] + half_width
+    return float(np.mean((y_true[mask] >= lower) & (y_true[mask] <= upper)))
+
+
+def _fit_temperature_scale(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    std: np.ndarray,
+    alpha: float,
+    target_coverage: float,
+    max_iters: int = 40,
+) -> float:
+    mask = np.isfinite(y_true) & np.isfinite(y_pred) & np.isfinite(std) & (std > 0.0)
+    if not np.any(mask):
+        return float("nan")
+    y_true = y_true[mask]
+    y_pred = y_pred[mask]
+    std = std[mask]
+
+    low = 1e-3
+    high = 5.0
+    cov_low = _interval_coverage(y_true, y_pred, std, alpha, low)
+    cov_high = _interval_coverage(y_true, y_pred, std, alpha, high)
+    while np.isfinite(cov_high) and cov_high < target_coverage and high < 100.0:
+        high *= 2.0
+        cov_high = _interval_coverage(y_true, y_pred, std, alpha, high)
+
+    if not np.isfinite(cov_low) or not np.isfinite(cov_high):
+        return float("nan")
+    if cov_low >= target_coverage:
+        return low
+    if cov_high <= target_coverage:
+        return high
+
+    best_scale = high
+    best_gap = abs(cov_high - target_coverage)
+    for _ in range(max_iters):
+        mid = 0.5 * (low + high)
+        cov_mid = _interval_coverage(y_true, y_pred, std, alpha, mid)
+        if not np.isfinite(cov_mid):
+            break
+        gap = abs(cov_mid - target_coverage)
+        if gap < best_gap:
+            best_gap = gap
+            best_scale = mid
+        if cov_mid < target_coverage:
+            low = mid
+        else:
+            high = mid
+    return best_scale
+
+
+def _compute_picp_curve_from_std(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    std: np.ndarray,
+    alphas: List[float],
+    scale: float,
+) -> pd.DataFrame:
+    if y_true.size == 0 or y_pred.size == 0 or std.size == 0:
+        return pd.DataFrame()
+    mask = np.isfinite(y_true) & np.isfinite(y_pred) & np.isfinite(std) & (std > 0.0)
+    if not np.any(mask):
+        return pd.DataFrame()
+
+    y_true = y_true[mask]
+    y_pred = y_pred[mask]
+    std = std[mask]
+
+    rows = []
+    for alpha in alphas:
+        if not 0.0 < alpha < 1.0:
+            continue
+        coverage = _interval_coverage(y_true, y_pred, std, alpha, scale)
+        rows.append(
+            {
+                "alpha": float(alpha),
+                "expected_coverage": float(1.0 - alpha),
+                "observed_coverage": coverage,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _split_calibration_hours(
+    hours: List[pd.Timestamp], ratio: float = 0.7
+) -> Tuple[List[pd.Timestamp], List[pd.Timestamp]]:
+    if not hours:
+        return [], []
+    hours_sorted = sorted(hours)
+    if len(hours_sorted) < 2:
+        return hours_sorted, hours_sorted
+    split_idx = max(1, int(len(hours_sorted) * ratio))
+    if split_idx >= len(hours_sorted):
+        split_idx = len(hours_sorted) - 1
+    return hours_sorted[:split_idx], hours_sorted[split_idx:]
+
+
 def _is_monotonic_nonincreasing(values: np.ndarray) -> bool:
     if values.size < 2:
         return True
@@ -580,6 +695,10 @@ def run_rolling_with_gnn(
     baseline_metrics_df = pd.DataFrame(baseline_metrics)
     gnn_metrics_df = pd.DataFrame(gnn_metrics)
 
+    if not gnn_df.empty:
+        std_lookup = baseline_df[["PULocationID", "target_hour", "mc_std"]]
+        gnn_df = gnn_df.merge(std_lookup, on=["PULocationID", "target_hour"], how="left")
+
     baseline_df.to_csv("predictions_rolling_mc.csv", index=False)
     baseline_metrics_df.to_csv("hourly_metrics_gru.csv", index=False)
     if not gnn_df.empty:
@@ -606,8 +725,38 @@ def run_rolling_with_gnn(
             f"coverage={monotonicity['coverage_nonincreasing']}"
         )
 
-    valid_baseline = baseline_df.dropna(subset=["y_pred", "y_true"])
+    all_hours = baseline_df["target_hour"].dropna().unique().tolist()
+    cal_hours, eval_hours = _split_calibration_hours(all_hours, ratio=0.7)
+    target_coverage = 1.0 - PICP_ALPHA
+
+    valid_baseline = baseline_df.dropna(subset=["y_pred", "y_true", "mc_std"]).copy()
     if not valid_baseline.empty:
+        cal_mask_base = valid_baseline["target_hour"].isin(cal_hours)
+        scale_baseline = _fit_temperature_scale(
+            valid_baseline.loc[cal_mask_base, "y_true"].to_numpy(),
+            valid_baseline.loc[cal_mask_base, "y_pred"].to_numpy(),
+            valid_baseline.loc[cal_mask_base, "mc_std"].to_numpy(),
+            PICP_ALPHA,
+            target_coverage,
+        )
+        valid_baseline["pi_lower_cal"] = np.nan
+        valid_baseline["pi_upper_cal"] = np.nan
+        z_val = _z_from_alpha(PICP_ALPHA)
+        if np.isfinite(scale_baseline):
+            std_vals = valid_baseline["mc_std"].to_numpy()
+            half_width = z_val * scale_baseline * std_vals
+            valid_baseline.loc[:, "pi_lower_cal"] = valid_baseline["y_pred"] - half_width
+            valid_baseline.loc[:, "pi_upper_cal"] = valid_baseline["y_pred"] + half_width
+        eval_mask_base = valid_baseline["target_hour"].isin(eval_hours)
+        overall_picp_cal = float(
+            np.mean(
+                (valid_baseline.loc[eval_mask_base, "y_true"]
+                 >= valid_baseline.loc[eval_mask_base, "pi_lower_cal"])
+                & (valid_baseline.loc[eval_mask_base, "y_true"]
+                   <= valid_baseline.loc[eval_mask_base, "pi_upper_cal"])
+            )
+        ) if np.isfinite(scale_baseline) and eval_mask_base.any() else float("nan")
+
         overall_mae = float(np.mean(np.abs(valid_baseline["y_pred"] - valid_baseline["y_true"])))
         overall_rmse = float(np.sqrt(np.mean((valid_baseline["y_pred"] - valid_baseline["y_true"]) ** 2)))
         overall_picp = float(
@@ -635,18 +784,56 @@ def run_rolling_with_gnn(
         overall_picp = float("nan")
         overall_nll = float("nan")
         overall_crps = float("nan")
+        scale_baseline = float("nan")
+        overall_picp_cal = float("nan")
 
-    baseline_curve = _compute_picp_curve(
+    baseline_curve_raw = _compute_picp_curve_from_std(
         valid_baseline["y_true"].to_numpy(),
         valid_baseline["y_pred"].to_numpy(),
+        valid_baseline["mc_std"].to_numpy(),
         PICP_ALPHAS,
+        scale=1.0,
+    )
+    baseline_curve = _compute_picp_curve_from_std(
+        valid_baseline["y_true"].to_numpy(),
+        valid_baseline["y_pred"].to_numpy(),
+        valid_baseline["mc_std"].to_numpy(),
+        PICP_ALPHAS,
+        scale=scale_baseline if np.isfinite(scale_baseline) else 1.0,
     )
     baseline_cal = _ece_ace_from_curve(baseline_curve)
+    if not baseline_curve_raw.empty:
+        baseline_curve_raw.to_csv("picp_curve_baseline_raw.csv", index=False)
     if not baseline_curve.empty:
-        baseline_curve.to_csv("picp_curve_baseline.csv", index=False)
+        baseline_curve.to_csv("picp_curve_baseline_calibrated.csv", index=False)
 
-    valid_gnn = gnn_df.dropna(subset=["Refined_Pred", "True_Value"]) if not gnn_df.empty else pd.DataFrame()
+    valid_gnn = (
+        gnn_df.dropna(subset=["Refined_Pred", "True_Value", "mc_std"])
+        if not gnn_df.empty
+        else pd.DataFrame()
+    )
     if not valid_gnn.empty:
+        cal_mask_gnn = valid_gnn["target_hour"].isin(cal_hours)
+        scale_gnn = _fit_temperature_scale(
+            valid_gnn.loc[cal_mask_gnn, "True_Value"].to_numpy(),
+            valid_gnn.loc[cal_mask_gnn, "Refined_Pred"].to_numpy(),
+            valid_gnn.loc[cal_mask_gnn, "mc_std"].to_numpy(),
+            PICP_ALPHA,
+            target_coverage,
+        )
+        eval_mask_gnn = valid_gnn["target_hour"].isin(eval_hours)
+        overall_picp_gnn_cal = (
+            _interval_coverage(
+                valid_gnn.loc[eval_mask_gnn, "True_Value"].to_numpy(),
+                valid_gnn.loc[eval_mask_gnn, "Refined_Pred"].to_numpy(),
+                valid_gnn.loc[eval_mask_gnn, "mc_std"].to_numpy(),
+                PICP_ALPHA,
+                scale_gnn,
+            )
+            if np.isfinite(scale_gnn) and eval_mask_gnn.any()
+            else float("nan")
+        )
+
         overall_mae_gnn = float(
             np.mean(np.abs(valid_gnn["Refined_Pred"] - valid_gnn["True_Value"]))
         )
@@ -686,37 +873,63 @@ def run_rolling_with_gnn(
         overall_picp_gnn = float("nan")
         overall_nll_gnn_mc = float("nan")
         overall_crps_gnn_mc = float("nan")
+        scale_gnn = float("nan")
+        overall_picp_gnn_cal = float("nan")
 
     gru_curve = pd.DataFrame()
     gnn_curve = pd.DataFrame()
     gru_cal = {"ece": float("nan"), "ace": float("nan")}
     gnn_cal = {"ece": float("nan"), "ace": float("nan")}
     if not valid_gnn.empty:
-        gmask_gru = valid_gnn[["GRU_Pred", "True_Value"]].notna().all(axis=1)
+        gmask_gru = valid_gnn[["GRU_Pred", "True_Value", "mc_std"]].notna().all(axis=1)
         if gmask_gru.any():
-            gru_curve = _compute_picp_curve(
+            gru_curve_raw = _compute_picp_curve_from_std(
                 valid_gnn.loc[gmask_gru, "True_Value"].to_numpy(),
                 valid_gnn.loc[gmask_gru, "GRU_Pred"].to_numpy(),
+                valid_gnn.loc[gmask_gru, "mc_std"].to_numpy(),
                 PICP_ALPHAS,
+                scale=1.0,
+            )
+            gru_curve = _compute_picp_curve_from_std(
+                valid_gnn.loc[gmask_gru, "True_Value"].to_numpy(),
+                valid_gnn.loc[gmask_gru, "GRU_Pred"].to_numpy(),
+                valid_gnn.loc[gmask_gru, "mc_std"].to_numpy(),
+                PICP_ALPHAS,
+                scale=scale_baseline if np.isfinite(scale_baseline) else 1.0,
             )
             gru_cal = _ece_ace_from_curve(gru_curve)
+            if not gru_curve_raw.empty:
+                gru_curve_raw.to_csv("picp_curve_gru_raw.csv", index=False)
             if not gru_curve.empty:
-                gru_curve.to_csv("picp_curve_gru.csv", index=False)
-        gmask_gnn = valid_gnn[["Refined_Pred", "True_Value"]].notna().all(axis=1)
+                gru_curve.to_csv("picp_curve_gru_calibrated.csv", index=False)
+        gmask_gnn = valid_gnn[["Refined_Pred", "True_Value", "mc_std"]].notna().all(axis=1)
         if gmask_gnn.any():
-            gnn_curve = _compute_picp_curve(
+            gnn_curve_raw = _compute_picp_curve_from_std(
                 valid_gnn.loc[gmask_gnn, "True_Value"].to_numpy(),
                 valid_gnn.loc[gmask_gnn, "Refined_Pred"].to_numpy(),
+                valid_gnn.loc[gmask_gnn, "mc_std"].to_numpy(),
                 PICP_ALPHAS,
+                scale=1.0,
+            )
+            gnn_curve = _compute_picp_curve_from_std(
+                valid_gnn.loc[gmask_gnn, "True_Value"].to_numpy(),
+                valid_gnn.loc[gmask_gnn, "Refined_Pred"].to_numpy(),
+                valid_gnn.loc[gmask_gnn, "mc_std"].to_numpy(),
+                PICP_ALPHAS,
+                scale=scale_gnn if np.isfinite(scale_gnn) else 1.0,
             )
             gnn_cal = _ece_ace_from_curve(gnn_curve)
+            if not gnn_curve_raw.empty:
+                gnn_curve_raw.to_csv("picp_curve_gnn_raw.csv", index=False)
             if not gnn_curve.empty:
-                gnn_curve.to_csv("picp_curve_gnn.csv", index=False)
+                gnn_curve.to_csv("picp_curve_gnn_calibrated.csv", index=False)
 
     with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
+        fh.write(f"Baseline PICP_cal@{target_coverage:.2f}: {overall_picp_cal}\n")
+        fh.write(f"Baseline scale: {scale_baseline}\n")
         fh.write(f"Baseline NLL: {overall_nll}\n")
         fh.write(f"Baseline CRPS: {overall_crps}\n")
         fh.write(f"Baseline curve ECE: {baseline_cal['ece']}\n")
@@ -725,6 +938,8 @@ def run_rolling_with_gnn(
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
         fh.write(f"GRU PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gru}\n")
         fh.write(f"GNN PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp_gnn}\n")
+        fh.write(f"GNN PICP_cal@{target_coverage:.2f}: {overall_picp_gnn_cal}\n")
+        fh.write(f"GNN scale: {scale_gnn}\n")
         fh.write(f"GNN(MC-approx) NLL: {overall_nll_gnn_mc}\n")
         fh.write(f"GNN(MC-approx) CRPS: {overall_crps_gnn_mc}\n")
         fh.write(f"GRU curve ECE: {gru_cal['ece']}\n")
@@ -734,11 +949,15 @@ def run_rolling_with_gnn(
 
     print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
+    print(f"🎯 Baseline PICP_cal@{target_coverage:.2f}={overall_picp_cal:.4f}")
+    print(f"🎯 Baseline scale={scale_baseline:.4f}")
     print(f"🎯 Baseline NLL={overall_nll:.4f}, CRPS={overall_crps:.4f}")
     print(f"🎯 Baseline curve ECE={baseline_cal['ece']:.4f}, ACE={baseline_cal['ace']:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
     print(f"🎯 GRU PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gru:.4f}")
     print(f"🎯 GNN PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp_gnn:.4f}")
+    print(f"🎯 GNN PICP_cal@{target_coverage:.2f}={overall_picp_gnn_cal:.4f}")
+    print(f"🎯 GNN scale={scale_gnn:.4f}")
     print(f"🎯 GNN(MC-approx) NLL={overall_nll_gnn_mc:.4f}, CRPS={overall_crps_gnn_mc:.4f}")
     print(f"🎯 GRU curve ECE={gru_cal['ece']:.4f}, ACE={gru_cal['ace']:.4f}")
     print(f"🎯 GNN curve ECE={gnn_cal['ece']:.4f}, ACE={gnn_cal['ace']:.4f}")
