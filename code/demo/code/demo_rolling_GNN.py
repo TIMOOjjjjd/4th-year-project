@@ -42,6 +42,14 @@ RETRAIN_EACH_HOUR = False
 MC_DROPOUT_SAMPLES = 10
 PICP_ALPHA = 0.1
 PICP_ALPHAS = [0.05, 0.1, 0.2, 0.3, 0.4]
+CONF_OPTIMIZE_WEIGHTS = True
+CONF_OPTIMIZE_TARGET = "mae"  # "mae", "rmse", "nll"
+CONF_OPTIMIZE_TRIALS = 8
+CONF_OPTIMIZE_SEED = 7
+CONF_CALIBRATION_RATIO = 0.7
+CONF_DEFAULT_WEIGHTS = {"a": 1.0, "b": 1.0, "c": 1.0, "d": 0.0}
+CONF_WEIGHT_RANGE = (-5.0, 5.0)
+CONF_BIAS_RANGE = (-2.0, 2.0)
 # =====================================================
 
 HISTORY_WINDOWS = {
@@ -202,46 +210,58 @@ def _compute_neighborhood_scores(step_df: pd.DataFrame, adjacency: Dict[int, Lis
     return neighborhood_scores
 
 
-def _combine_confidence_components(
-    prior: float, stability: float, neighborhood: float, weights: Dict[str, float]
-) -> float:
-    prior_c = np.clip(prior, 0.05, 1.0)
-    stability_c = np.clip(stability, 0.05, 1.0)
-    neighborhood_c = np.clip(neighborhood, 0.05, 1.0)
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
 
-    log_score = (
-        weights["prior"] * np.log(prior_c)
-        + weights["stability"] * np.log(stability_c)
-        + weights["neighborhood"] * np.log(neighborhood_c)
+
+def _apply_confidence_weights(df: pd.DataFrame, weights: Dict[str, float]) -> None:
+    prior = df["prior_score"].to_numpy(dtype=float)
+    stability = df["stability_score"].to_numpy(dtype=float)
+    neighborhood = df["neighborhood_score"].to_numpy(dtype=float)
+    linear = (
+        weights["a"] * prior
+        + weights["b"] * stability
+        + weights["c"] * neighborhood
+        + weights["d"]
     )
-    return float(np.clip(np.exp(log_score), 0.05, 1.0))
+    df["confidence"] = np.clip(_sigmoid(linear), 0.0, 1.0)
+
+
+def _attach_confidence_components(
+    step_df: pd.DataFrame,
+    prior_scores: Dict[int, float],
+    adjacency: Dict[int, List[int]],
+) -> None:
+    stability_scores = _compute_stability_scores(step_df)
+    neighborhood_scores = _compute_neighborhood_scores(step_df, adjacency)
+    step_df["prior_score"] = step_df["PULocationID"].map(
+        lambda zid: float(prior_scores.get(int(zid), 0.4))
+    )
+    step_df["stability_score"] = step_df["PULocationID"].map(
+        lambda zid: float(stability_scores.get(int(zid), 0.5))
+    )
+    step_df["neighborhood_score"] = step_df["PULocationID"].map(
+        lambda zid: float(neighborhood_scores.get(int(zid), 0.6))
+    )
 
 
 def _assign_confidence_scores(
     step_df: pd.DataFrame,
     prior_scores: Dict[int, float],
     adjacency: Dict[int, List[int]],
+    weights: Dict[str, float],
 ) -> Dict[int, float]:
-    stability_scores = _compute_stability_scores(step_df)
-    neighborhood_scores = _compute_neighborhood_scores(step_df, adjacency)
-    weights = {"prior": 0.3, "stability": 0.4, "neighborhood": 0.3}
-
+    required_cols = {"prior_score", "stability_score", "neighborhood_score"}
+    if not required_cols.issubset(step_df.columns):
+        _attach_confidence_components(step_df, prior_scores, adjacency)
+    _apply_confidence_weights(step_df, weights)
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
         zid = int(row.PULocationID)
         if not np.isfinite(row.y_pred):
             zone_confidence[zid] = 0.0
             continue
-
-        prior = prior_scores.get(zid, 0.4)
-        stability = stability_scores.get(zid, 0.5)
-        neighborhood = neighborhood_scores.get(zid, 0.6)
-        combined = _combine_confidence_components(prior, stability, neighborhood, weights)
-        zone_confidence[zid] = combined
-
-    step_df["confidence"] = step_df["PULocationID"].map(
-        lambda zid: zone_confidence.get(int(zid), 0.0)
-    )
+        zone_confidence[zid] = float(row.confidence)
     return zone_confidence
 
 
@@ -474,6 +494,140 @@ def _split_calibration_hours(
     return hours_sorted[:split_idx], hours_sorted[split_idx:]
 
 
+def _sample_confidence_weights(rng: np.random.Generator) -> Dict[str, float]:
+    low, high = CONF_WEIGHT_RANGE
+    b_low, b_high = CONF_BIAS_RANGE
+    return {
+        "a": float(rng.uniform(low, high)),
+        "b": float(rng.uniform(low, high)),
+        "c": float(rng.uniform(low, high)),
+        "d": float(rng.uniform(b_low, b_high)),
+    }
+
+
+def _run_gnn_for_step(
+    df: pd.DataFrame,
+    device: torch.device,
+    target_ts: pd.Timestamp,
+    step_df: pd.DataFrame,
+    zones: List[int],
+    prior_scores: Dict[int, float],
+    adjacency: Dict[int, List[int]],
+    weights: Dict[str, float],
+    write_outputs: bool = True,
+) -> Tuple[pd.DataFrame, Dict[str, float], float, float]:
+    zone_confidence = _assign_confidence_scores(step_df, prior_scores, adjacency, weights)
+    rename_map = {"y_pred": "Prediction", "y_true": "True Value"}
+    gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
+    gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
+
+    gnn_output_path = (
+        f"final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
+        if write_outputs
+        else None
+    )
+    gnn_output_df, gnn_metric = run_gnn_pipeline(
+        df_temp=df,
+        target_date=target_ts,
+        excluded_zones=EXCLUDED_ZONES,
+        device=device,
+        merged_csv_path=None,
+        zone_total_number=len(zones),
+        final_output_csv=gnn_output_path,
+        predictions_df=gnn_input,
+        zone_confidence=zone_confidence,
+        show_plots=False,
+    )
+    gnn_output_df["target_hour"] = target_ts
+    gnn_output_df["gru_pi_lower"] = np.nan
+    gnn_output_df["gru_pi_upper"] = np.nan
+    gnn_output_df["gnn_pi_lower"] = np.nan
+    gnn_output_df["gnn_pi_upper"] = np.nan
+
+    gnn_mask = gnn_output_df[["True_Value", "GRU_Pred", "Refined_Pred"]].notna().all(axis=1)
+    if gnn_mask.any():
+        true_vals = gnn_output_df.loc[gnn_mask, "True_Value"].values
+        gru_residuals = true_vals - gnn_output_df.loc[gnn_mask, "GRU_Pred"].values
+        gnn_residuals = true_vals - gnn_output_df.loc[gnn_mask, "Refined_Pred"].values
+        gru_q_low, gru_q_high = np.quantile(
+            gru_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
+        )
+        gnn_q_low, gnn_q_high = np.quantile(
+            gnn_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
+        )
+        gnn_output_df.loc[gnn_mask, "gru_pi_lower"] = (
+            gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_low
+        )
+        gnn_output_df.loc[gnn_mask, "gru_pi_upper"] = (
+            gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_high
+        )
+        gnn_output_df.loc[gnn_mask, "gnn_pi_lower"] = (
+            gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_low
+        )
+        gnn_output_df.loc[gnn_mask, "gnn_pi_upper"] = (
+            gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_high
+        )
+        gru_lower = gnn_output_df.loc[gnn_mask, "gru_pi_lower"].values
+        gru_upper = gnn_output_df.loc[gnn_mask, "gru_pi_upper"].values
+        gnn_lower = gnn_output_df.loc[gnn_mask, "gnn_pi_lower"].values
+        gnn_upper = gnn_output_df.loc[gnn_mask, "gnn_pi_upper"].values
+        picp_gru = float(np.mean((true_vals >= gru_lower) & (true_vals <= gru_upper)))
+        picp_gnn = float(np.mean((true_vals >= gnn_lower) & (true_vals <= gnn_upper)))
+    else:
+        picp_gru = float("nan")
+        picp_gnn = float("nan")
+    return gnn_output_df, gnn_metric, picp_gru, picp_gnn
+
+
+def _evaluate_confidence_weights(
+    cached_steps: List[Dict[str, object]],
+    val_hours: List[pd.Timestamp],
+    df: pd.DataFrame,
+    device: torch.device,
+    zones: List[int],
+    prior_scores: Dict[int, float],
+    adjacency: Dict[int, List[int]],
+    weights: Dict[str, float],
+    objective: str,
+) -> float:
+    scores: List[float] = []
+    for entry in cached_steps:
+        target_ts = entry["target_hour"]
+        if target_ts not in val_hours:
+            continue
+        step_df = entry["step_df"].copy()
+        gnn_output_df, gnn_metric, _, _ = _run_gnn_for_step(
+            df=df,
+            device=device,
+            target_ts=target_ts,
+            step_df=step_df,
+            zones=zones,
+            prior_scores=prior_scores,
+            adjacency=adjacency,
+            weights=weights,
+            write_outputs=False,
+        )
+        if objective == "rmse":
+            scores.append(float(np.sqrt(gnn_metric["mse_refined"])))
+        elif objective == "nll":
+            merged = gnn_output_df.merge(
+                step_df[["PULocationID", "mc_std"]], on="PULocationID", how="left"
+            )
+            mask = merged[["True_Value", "Refined_Pred", "mc_std"]].notna().all(axis=1)
+            if mask.any():
+                nll_crps = _gaussian_nll_crps(
+                    merged.loc[mask, "True_Value"].to_numpy(),
+                    merged.loc[mask, "Refined_Pred"].to_numpy(),
+                    merged.loc[mask, "mc_std"].to_numpy(),
+                )
+                scores.append(float(nll_crps["nll"]))
+        else:
+            scores.append(float(gnn_metric["mae_refined"]))
+    if not scores:
+        return float("inf")
+    return float(np.mean(scores))
+
+
 def _is_monotonic_nonincreasing(values: np.ndarray) -> bool:
     if values.size < 2:
         return True
@@ -518,6 +672,9 @@ def run_rolling_with_gnn(
     gnn_records: List[pd.DataFrame] = []
     baseline_metrics: List[Dict[str, float]] = [] #{ "target_hour": <Timestamp>, "MAE": <float>, "RMSE": <float>, "mean_true": <float> },
     gnn_metrics: List[Dict[str, float]] = []
+    cached_steps: List[Dict[str, object]] = []
+    best_conf_weights = dict(CONF_DEFAULT_WEIGHTS)
+    best_conf_score = float("nan")
 
     for step in range(ROLLING_STEPS):
         target_ts = START_TARGET + pd.Timedelta(hours=step)
@@ -575,7 +732,13 @@ def run_rolling_with_gnn(
         step_df["target_hour"] = target_ts
         step_df["pi_lower"] = np.nan
         step_df["pi_upper"] = np.nan
-        zone_confidence = _assign_confidence_scores(step_df, prior_scores, adjacency)
+        _attach_confidence_components(step_df, prior_scores, adjacency)
+        if not CONF_OPTIMIZE_WEIGHTS:
+            zone_confidence = _assign_confidence_scores(
+                step_df, prior_scores, adjacency, CONF_DEFAULT_WEIGHTS
+            )
+        else:
+            zone_confidence = {}
         baseline_records.append(step_df)
 
         mask = step_df["y_pred"].notna() & step_df["y_true"].notna()
@@ -621,79 +784,93 @@ def run_rolling_with_gnn(
             }
         )
 
-        rename_map = {"y_pred": "Prediction", "y_true": "True Value"}
-        gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
-        gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
-
-        gnn_output_path = f"final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
-        gnn_output_df, gnn_metric = run_gnn_pipeline(
-            df_temp=df,
-            target_date=target_ts,
-            excluded_zones=EXCLUDED_ZONES,
-            device=device,
-            merged_csv_path=None,
-            zone_total_number=len(zones),
-            final_output_csv=gnn_output_path,
-            predictions_df=gnn_input,
-            zone_confidence=zone_confidence,
-            show_plots=False,
-        )
-        gnn_output_df["target_hour"] = target_ts
-        gnn_output_df["gru_pi_lower"] = np.nan
-        gnn_output_df["gru_pi_upper"] = np.nan
-        gnn_output_df["gnn_pi_lower"] = np.nan
-        gnn_output_df["gnn_pi_upper"] = np.nan
-        gnn_records.append(gnn_output_df)
-
-        gnn_mask = gnn_output_df[["True_Value", "GRU_Pred", "Refined_Pred"]].notna().all(axis=1)
-        if gnn_mask.any():
-            true_vals = gnn_output_df.loc[gnn_mask, "True_Value"].values
-            gru_residuals = true_vals - gnn_output_df.loc[gnn_mask, "GRU_Pred"].values
-            gnn_residuals = true_vals - gnn_output_df.loc[gnn_mask, "Refined_Pred"].values
-            gru_q_low, gru_q_high = np.quantile(
-                gru_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
-            )
-            gnn_q_low, gnn_q_high = np.quantile(
-                gnn_residuals, [PICP_ALPHA / 2.0, 1.0 - PICP_ALPHA / 2.0]
-            )
-            gnn_output_df.loc[gnn_mask, "gru_pi_lower"] = (
-                gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_low
-            )
-            gnn_output_df.loc[gnn_mask, "gru_pi_upper"] = (
-                gnn_output_df.loc[gnn_mask, "GRU_Pred"] + gru_q_high
-            )
-            gnn_output_df.loc[gnn_mask, "gnn_pi_lower"] = (
-                gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_low
-            )
-            gnn_output_df.loc[gnn_mask, "gnn_pi_upper"] = (
-                gnn_output_df.loc[gnn_mask, "Refined_Pred"] + gnn_q_high
-            )
-            gru_lower = gnn_output_df.loc[gnn_mask, "gru_pi_lower"].values
-            gru_upper = gnn_output_df.loc[gnn_mask, "gru_pi_upper"].values
-            gnn_lower = gnn_output_df.loc[gnn_mask, "gnn_pi_lower"].values
-            gnn_upper = gnn_output_df.loc[gnn_mask, "gnn_pi_upper"].values
-            picp_gru = float(np.mean((true_vals >= gru_lower) & (true_vals <= gru_upper)))
-            picp_gnn = float(np.mean((true_vals >= gnn_lower) & (true_vals <= gnn_upper)))
+        if CONF_OPTIMIZE_WEIGHTS:
+            cached_steps.append({"target_hour": target_ts, "step_df": step_df.copy()})
         else:
-            picp_gru = float("nan")
-            picp_gnn = float("nan")
+            gnn_output_df, gnn_metric, picp_gru, picp_gnn = _run_gnn_for_step(
+                df=df,
+                device=device,
+                target_ts=target_ts,
+                step_df=step_df,
+                zones=zones,
+                prior_scores=prior_scores,
+                adjacency=adjacency,
+                weights=CONF_DEFAULT_WEIGHTS,
+            )
+            gnn_records.append(gnn_output_df)
+            gnn_metrics.append(
+                {
+                    "target_hour": target_ts,
+                    "MAE_GRU": gnn_metric["mae_gru"],
+                    "MSE_GRU": gnn_metric["mse_gru"],
+                    "MAE_GNN": gnn_metric["mae_refined"],
+                    "MSE_GNN": gnn_metric["mse_refined"],
+                    "PICP_GRU": picp_gru,
+                    "PICP_GNN": picp_gnn,
+                }
+            )
 
-        gnn_metrics.append(
-            {
-                "target_hour": target_ts,
-                "MAE_GRU": gnn_metric["mae_gru"],
-                "MSE_GRU": gnn_metric["mse_gru"],
-                "MAE_GNN": gnn_metric["mae_refined"],
-                "MSE_GNN": gnn_metric["mse_refined"],
-                "PICP_GRU": picp_gru,
-                "PICP_GNN": picp_gnn,
-            }
+    if CONF_OPTIMIZE_WEIGHTS and cached_steps:
+        all_hours = [entry["target_hour"] for entry in cached_steps]
+        _, val_hours = _split_calibration_hours(all_hours, ratio=CONF_CALIBRATION_RATIO)
+        rng = np.random.default_rng(CONF_OPTIMIZE_SEED)
+        candidates = [CONF_DEFAULT_WEIGHTS] + [
+            _sample_confidence_weights(rng) for _ in range(CONF_OPTIMIZE_TRIALS)
+        ]
+        best_conf_score = float("inf")
+        for weights in candidates:
+            score = _evaluate_confidence_weights(
+                cached_steps=cached_steps,
+                val_hours=val_hours,
+                df=df,
+                device=device,
+                zones=zones,
+                prior_scores=prior_scores,
+                adjacency=adjacency,
+                weights=weights,
+                objective=CONF_OPTIMIZE_TARGET,
+            )
+            if score < best_conf_score:
+                best_conf_score = score
+                best_conf_weights = dict(weights)
+        print(
+            f"✅ Best confidence weights (objective={CONF_OPTIMIZE_TARGET}): {best_conf_weights} "
+            f"score={best_conf_score:.4f}"
         )
+
+        for entry in cached_steps:
+            target_ts = entry["target_hour"]
+            step_df = entry["step_df"]
+            gnn_output_df, gnn_metric, picp_gru, picp_gnn = _run_gnn_for_step(
+                df=df,
+                device=device,
+                target_ts=target_ts,
+                step_df=step_df,
+                zones=zones,
+                prior_scores=prior_scores,
+                adjacency=adjacency,
+                weights=best_conf_weights,
+            )
+            gnn_records.append(gnn_output_df)
+            gnn_metrics.append(
+                {
+                    "target_hour": target_ts,
+                    "MAE_GRU": gnn_metric["mae_gru"],
+                    "MSE_GRU": gnn_metric["mse_gru"],
+                    "MAE_GNN": gnn_metric["mae_refined"],
+                    "MSE_GNN": gnn_metric["mse_refined"],
+                    "PICP_GRU": picp_gru,
+                    "PICP_GNN": picp_gnn,
+                }
+            )
 
     baseline_df = pd.concat(baseline_records, ignore_index=True)
     gnn_df = pd.concat(gnn_records, ignore_index=True) if gnn_records else pd.DataFrame()
     baseline_metrics_df = pd.DataFrame(baseline_metrics)
     gnn_metrics_df = pd.DataFrame(gnn_metrics)
+
+    if not baseline_df.empty:
+        _apply_confidence_weights(baseline_df, best_conf_weights)
 
     if not gnn_df.empty:
         std_lookup = baseline_df[["PULocationID", "target_hour", "mc_std"]]
@@ -925,6 +1102,10 @@ def run_rolling_with_gnn(
                 gnn_curve.to_csv("picp_curve_gnn_calibrated.csv", index=False)
 
     with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
+        fh.write(
+            f"Confidence weights (objective={CONF_OPTIMIZE_TARGET}): {best_conf_weights} "
+            f"score={best_conf_score}\n"
+        )
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"Baseline PICP@{1.0 - PICP_ALPHA:.2f}: {overall_picp}\n")
@@ -947,7 +1128,11 @@ def run_rolling_with_gnn(
         fh.write(f"GNN curve ECE: {gnn_cal['ece']}\n")
         fh.write(f"GNN curve ACE: {gnn_cal['ace']}\n")
 
-    print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
+    print(
+        f"\n🎯 Confidence weights (objective={CONF_OPTIMIZE_TARGET}): {best_conf_weights} "
+        f"score={best_conf_score:.4f}"
+    )
+    print(f"🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 Baseline PICP@{1.0 - PICP_ALPHA:.2f}={overall_picp:.4f}")
     print(f"🎯 Baseline PICP_cal@{target_coverage:.2f}={overall_picp_cal:.4f}")
     print(f"🎯 Baseline scale={scale_baseline:.4f}")
