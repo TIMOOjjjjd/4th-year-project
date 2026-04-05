@@ -1,0 +1,245 @@
+\documentclass[12pt,a4paper]{report}
+
+% ---------------------------
+% Page layout and formatting
+% ---------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+
+% ---------------------------
+% Mathematics
+% ---------------------------
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{bm}
+
+% ---------------------------
+% Figures, tables, captions
+% ---------------------------
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% ---------------------------
+% Colors and code listings
+% ---------------------------
+\usepackage{xcolor}
+\usepackage{listings}
+
+\definecolor{codebg}{RGB}{245,245,244}
+\definecolor{codecomment}{RGB}{0,128,0}
+\definecolor{codekeyword}{RGB}{0,0,180}
+\definecolor{codestring}{RGB}{163,21,21}
+
+\lstdefinestyle{mystyle}{
+	backgroundcolor=\color{codebg},
+	commentstyle=\color{codecomment},
+	keywordstyle=\color{codekeyword}\bfseries,
+	stringstyle=\color{codestring},
+	basicstyle=\ttfamily\small,
+	breakatwhitespace=false,
+	breaklines=true,
+	captionpos=b,
+	keepspaces=true,
+	numbers=left,
+	numbersep=8pt,
+	numberstyle=\tiny\color{gray},
+	showspaces=false,
+	showstringspaces=false,
+	showtabs=false,
+	tabsize=4,
+	frame=single
+}
+\lstset{style=mystyle}
+
+% ---------------------------
+% Hyperlinks and references
+% ---------------------------
+\usepackage{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\hypersetup{
+	colorlinks=true,
+	linkcolor=blue,
+	citecolor=blue,
+	urlcolor=blue,
+	pdftitle={Your Thesis Title},
+	pdfauthor={Your Name}
+}
+
+% ---------------------------
+% Bibliography
+% ---------------------------
+\usepackage[backend=biber,style=ieee]{biblatex}
+\addbibresource{references.bib}
+
+% ---------------------------
+% Optional utilities
+% ---------------------------
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{pdflscape}
+
+% ---------------------------
+% Header / Footer
+% ---------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{MSc Thesis}
+\fancyhead[R]{\leftmark}
+\fancyfoot[C]{\thepage}
+
+% ---------------------------
+% Theorem environments
+% ---------------------------
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{definition}{Definition}[chapter]
+
+% ---------------------------
+% Document starts here
+% ---------------------------
+\begin{document}
+	
+	% ---------------------------
+	% Title page
+	% ---------------------------
+	\begin{titlepage}
+		\centering
+		\vspace*{2cm}
+		
+		{\Huge\bfseries Confidence-Weighted Multi-Scale Rolling Forecasting of Urban Taxi Demand with GraphSAGE-Based Spatial Refinement\par}
+		\vspace{1.5cm}
+		
+		{\Large Tianqi Wang\par}
+		\vspace{0.5cm}
+		{\large University of Warwick\par}
+		{\large MSc by Research Thesis\par}
+		\vspace{1.5cm}
+		
+		{\large Supervisor: Professor Ligang He\par}
+		\vfill
+		
+		{\large Submitted in partial fulfilment of the requirements\\
+			for the degree of Master of Science by Research\par}
+		
+		\vspace{1cm}
+		{\large 04 2026\par}
+	\end{titlepage}
+	
+	% ---------------------------
+	% Front matter
+	% ---------------------------
+	\pagenumbering{roman}
+	
+	\chapter*{Abstract}
+	Accurate urban taxi demand forecasting is essential for intelligent transportation management, fleet dispatching, and congestion mitigation. However, this task remains challenging because demand patterns exhibit strong temporal non-stationarity, multi-scale periodicity, and complex spatial dependency across city regions. To address these issues, this study proposes a two-stage framework for hourly taxi demand prediction over New York City Taxi Zones, integrating multi-scale temporal modeling, uncertainty estimation, and graph-based spatial refinement. In the first stage, a persistent per-zone forecasting model is developed to capture temporal dynamics at four different scales: hourly, daily, weekly, and monthly. The architecture combines GRU, LSTM, and Transformer components to learn short-term fluctuations and long-range temporal regularities within a unified multi-branch design. Monte Carlo Dropout is further employed to estimate predictive uncertainty for each zone. In the second stage, the base predictions are treated as priors and refined through a GraphSAGE-based residual learning module constructed on an origin-destination flow graph. To improve robustness, a confidence-weighting mechanism is introduced by combining historical sufficiency, model stability, and neighborhood consistency, allowing unreliable zones to contribute less during graph refinement. The overall system is evaluated under a rolling forecasting protocol that simulates real-world hourly prediction updates. Experimental results indicate that the proposed graph refinement stage reduces prediction error relative to the temporal baseline and is especially beneficial for zones with sparse history or high predictive variance. In addition, the proposed method improves spatial coherence among neighboring zones and provides a more stable forecasting process under dynamic urban conditions. Overall, the framework demonstrates that combining multi-scale sequence learning with confidence-aware graph neural refinement offers an effective, robust, and extensible solution for spatiotemporal urban taxi demand forecasting problems.
+	
+	\chapter*{Acknowledgements}
+	I would like to thank ...
+	
+	\tableofcontents
+	\listoffigures
+	\listoftables
+	
+	% ---------------------------
+	% Main matter
+	% ---------------------------
+	\clearpage
+	\pagenumbering{arabic}
+	\setstretch{1.5}
+	
+	\chapter{Introduction}
+	\section{Background}
+	Write your introduction here.
+	
+	\section{Research Problem}
+	State the research problem clearly.
+	
+	\section{Contributions}
+	The main contributions of this thesis are:
+	\begin{itemize}
+		\item Contribution 1
+		\item Contribution 2
+		\item Contribution 3
+	\end{itemize}
+	
+	\chapter{Literature Review}
+	\section{Related Work}
+	You can cite papers like this \cite{example_ref}.
+	
+	\chapter{Methodology}
+	\section{Problem Formulation}
+	An example equation:
+	\begin{equation}
+		y = f(x)
+	\end{equation}
+	
+	\section{Model Architecture}
+	You can insert figures like this:
+
+	
+	\chapter{Implementation}
+	\section{System Setup}
+	Describe your implementation details here.
+	
+	\section{Code Example}
+	Example Python code:
+	\begin{lstlisting}[language=Python, caption={Example Python code}]
+		import torch
+		import torch.nn as nn
+		
+		class MyModel(nn.Module):
+		def __init__(self):
+		super().__init__()
+		self.linear = nn.Linear(10, 1)
+		
+		def forward(self, x):
+		return self.linear(x)
+	\end{lstlisting}
+	
+	\chapter{Experiments}
+	\section{Experimental Setup}
+	Describe dataset, metrics, baselines, etc.
+	
+	\section{Results}
+	Example table:
+	\begin{table}[H]
+		\centering
+		\caption{Comparison of model performance}
+		\label{tab:results}
+		\begin{tabular}{lcc}
+			\toprule
+			Model & MAE & RMSE \\
+			\midrule
+			Baseline & 12.34 & 18.56 \\
+			Proposed Method & 10.21 & 15.43 \\
+			\bottomrule
+		\end{tabular}
+	\end{table}
+	
+	\chapter{Discussion}
+	Discuss strengths, limitations, and interpretation of results.
+	
+	\chapter{Conclusion}
+	Summarise the thesis and suggest future work.
+	
+	% ---------------------------
+	% Back matter
+	% ---------------------------
+	\appendix
+	\chapter{Additional Materials}
+	Additional experiments, derivations, or implementation details.
+	
+	\printbibliography
+	
+\end{document}
