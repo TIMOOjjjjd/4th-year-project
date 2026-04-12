@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  10 APR 2026 22:33
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  11 APR 2026 21:52
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -918,14 +918,21 @@ Package biblatex Info: ... file 'main.bbl' found.
 
 Package biblatex Warning: The following entry could not be found
 (biblatex)                in the database:
-(biblatex)                cho2014gru
+(biblatex)                info15090517，rnn_evolution_2024
 (biblatex)                Please verify the spelling and rerun
 (biblatex)                LaTeX afterwards.
 
 
 Package biblatex Warning: The following entry could not be found
 (biblatex)                in the database:
-(biblatex)                info15090517，rnn_evolution_2024
+(biblatex)                rong2024odsurvey
+(biblatex)                Please verify the spelling and rerun
+(biblatex)                LaTeX afterwards.
+
+
+Package biblatex Warning: The following entry could not be found
+(biblatex)                in the database:
+(biblatex)                wang2024od
 (biblatex)                Please verify the spelling and rerun
 (biblatex)                LaTeX afterwards.
 
@@ -1029,9 +1036,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 
 [2]
 
-LaTeX Warning: Citation 'cho2014gru' on page 3 undefined on input line 179.
-
-
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
 (fancyhdr)                \setlength{\headheight}{14.49998pt}.
@@ -1093,6 +1097,11 @@ Chapter 2.
 [9
 
 ]
+Overfull \hbox (6.91124pt too wide) in paragraph at lines 237--238
+\T1/lmr/m/n/12 works and trans-former vari-ants are ef-fec-tive for ex-tract-in
+g se-quen-tial de-pen-den-cies, whereas
+ []
+
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -1133,6 +1142,14 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [14]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[15]
 Overfull \hbox (28.52025pt too wide) in paragraph at lines 275--275
 []\T1/lmr/bx/n/17.28 Multi-Scale Mod-elling as a Dis-tinct Re-search Theme 
  []
@@ -1144,15 +1161,11 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[15]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 14.49998pt, for example:
-(fancyhdr)                \setlength{\headheight}{14.49998pt}.
-(fancyhdr)                You might also make \topmargin smaller:
-(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
-
 [16]
+
+LaTeX Warning: Citation 'rong2024odsurvey' on page 17 undefined on input line 2
+91.
+
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -1161,6 +1174,9 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [17]
+
+LaTeX Warning: Citation 'wang2024od' on page 18 undefined on input line 295.
+
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -1185,7 +1201,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [20]
-Overfull \hbox (20.17822pt too wide) in paragraph at lines 325--325
+Overfull \hbox (20.17822pt too wide) in paragraph at lines 324--324
 []\T1/lmr/bx/n/17.28 Historical Sum-mary Fea-tures and Lightweight Con-
  []
 
@@ -1261,8 +1277,16 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [29]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[30]
 Chapter 3.
-[30
+[31
 
 ]
 Chapter 4.
@@ -1270,28 +1294,28 @@ Chapter 4.
 File: lstlang1.sty 2025/11/14 1.11b listings language file
 )
 Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on i
-nput line 414.
+nput line 415.
 LaTeX Font Info:    Font shape `T1/lmtt/bx/n' in size <10.95> not available
-(Font)              Font shape `T1/lmtt/b/n' tried instead on input line 415.
- [31
+(Font)              Font shape `T1/lmtt/b/n' tried instead on input line 416.
+ [32
 
 ]
 Chapter 5.
-[32
-
-]
-Chapter 6.
 [33
 
 ]
-Chapter 7.
+Chapter 6.
 [34
 
 ]
-Appendix A.
+Chapter 7.
 [35
 
-] [36
+]
+Appendix A.
+[36
+
+] [37
 
 ]
 
@@ -1301,8 +1325,8 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[37]
-Overfull \hbox (22.77242pt too wide) in paragraph at lines 463--463
+[38]
+Overfull \hbox (22.77242pt too wide) in paragraph at lines 464--464
 \T1/lmr/m/n/12 line]. Avail-able: [][]$\T1/lmtt/m/n/12 https : / / papers . nip
 s . cc / paper / 6703 -[] inductive -[] representation -[]
  []
@@ -1314,7 +1338,46 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[38] (./main.aux)
+[39]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[40]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[41]
+Missing character: There is no č ("10D) in font ec-lmr12!
+
+Overfull \hbox (4.54793pt too wide) in paragraph at lines 464--464
+[]\T1/lmr/m/n/12 Y. Choi et al., ``Hi-er-ar-chi-cal uncertainty-aware graph neu
+-ral net-work,'' \T1/lmr/m/it/12 arXiv preprint
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[42]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[43] (./main.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-03-20>
@@ -1326,12 +1389,12 @@ Package logreq Info: Writing requests to 'main.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 23878 strings out of 467992
- 422031 string characters out of 5433178
- 1321244 words of memory out of 5000000
- 52481 multiletter control sequences out of 15000+600000
+ 24016 strings out of 467992
+ 429384 string characters out of 5433178
+ 1324662 words of memory out of 5000000
+ 52619 multiletter control sequences out of 15000+600000
  686163 words of font info for 81 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 69i,12n,79p,2156b,4963s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 69i,12n,79p,2156b,4965s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on main.pdf (45 pages).
+Output written on main.pdf (50 pages).
