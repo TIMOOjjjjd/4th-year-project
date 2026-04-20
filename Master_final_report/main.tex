@@ -162,17 +162,17 @@
 
 \section{Background and Motivation}
 
-Urban mobility forecasting has become a central problem in intelligent transportation systems because accurate short-term demand estimates influence vehicle dispatching, idle cruising reduction, passenger waiting time, congestion management, and the overall operational efficiency of city-scale transport services.\cite{xue_2020_spatialtemporal} In large metropolitan areas, taxi demand is not only highly dynamic but also strongly heterogeneous across space and time.\cite{qian_2015_spatial} Different urban regions exhibit distinct activity rhythms shaped by commuting peaks, nightlife, commercial density, tourism, and residential land use. At the same time, the temporal behaviour of demand is rarely governed by a single periodic pattern. Instead, it reflects a mixture of short-term fluctuation, daily repetition, weekly regularity, and longer-range seasonal tendencies. These properties make hourly taxi demand forecasting a difficult spatiotemporal learning task rather than a conventional univariate time-series regression problem.\cite{schaller_2005_a}
+Urban mobility forecasting has become a central problem in intelligent transportation systems because accurate short-term demand estimates influence vehicle dispatching, idle cruising reduction, passenger waiting time, congestion management, and the overall operational efficiency of city-scale transport services.\cite{xue\_2020\_spatialtemporal} In large metropolitan areas, taxi demand is not only highly dynamic but also strongly heterogeneous across space and time.\cite{qian\_2015\_spatial} Different urban regions exhibit distinct activity rhythms shaped by commuting peaks, nightlife, commercial density, tourism, and residential land use. At the same time, the temporal behaviour of demand is rarely governed by a single periodic pattern. Instead, it reflects a mixture of short-term fluctuation, daily repetition, weekly regularity, and longer-range seasonal tendencies. These properties make hourly taxi demand forecasting a difficult spatiotemporal learning task rather than a conventional univariate time-series regression problem.\cite{schaller\_2005\_a}
 
 The challenge becomes more pronounced when the forecasting objective is defined at the level of individual Taxi Zones. Fine-grained zone-level prediction is practically useful because dispatch systems, relocation strategies, and local service balancing all depend on geographically resolved demand estimation.\cite{8691703} However, a disaggregated formulation also introduces additional statistical difficulty. Some zones generate abundant historical observations, while others are comparatively sparse or irregular. In low-activity regions, the observed series may contain many zero or near-zero counts interspersed with occasional surges, which makes the learning problem noisy and unstable due to sparsity and uncertainty in travel demand data \cite{zhuang2022sparse}. In high-activity districts, by contrast, the model must handle larger amplitude fluctuations and sharper temporal transitions, requiring strong capability in capturing complex spatial-temporal dependencies \cite{wu2019graph}. A forecasting framework that performs well across all zones therefore needs to balance sensitivity to local temporal dynamics with robustness to data sparsity and uncertainty.
 
-A second source of complexity lies in the spatially coupled nature of urban travel demand. Taxi zones do not evolve independently. Neighbouring regions, or regions connected by strong origin-destination flows, often exhibit correlated demand patterns because travel activity propagates through the city via commuting corridors, business districts, airports, entertainment clusters, and residential catchment areas.\cite{xue_2020_spatialtemporal} A purely per-zone temporal model can learn local history effectively, but it may fail to correct errors that arise when neighbouring zones move coherently or when a zone's local history is insufficient to explain its next-hour demand. This is particularly problematic under rolling forecasting conditions, where predictions must be refreshed hour by hour and small local errors can accumulate into spatially inconsistent outputs. Capturing such dependence requires a representation that can use structural information beyond the isolated time series of a single region.
+A second source of complexity lies in the spatially coupled nature of urban travel demand. Taxi zones do not evolve independently. Neighbouring regions, or regions connected by strong origin-destination flows, often exhibit correlated demand patterns because travel activity propagates through the city via commuting corridors, business districts, airports, entertainment clusters, and residential catchment areas.\cite{xue\_2020\_spatialtemporal} A purely per-zone temporal model can learn local history effectively, but it may fail to correct errors that arise when neighbouring zones move coherently or when a zone's local history is insufficient to explain its next-hour demand. This is particularly problematic under rolling forecasting conditions, where predictions must be refreshed hour by hour and small local errors can accumulate into spatially inconsistent outputs. Capturing such dependence requires a representation that can use structural information beyond the isolated time series of a single region.
 
 Beyond technical performance, this problem also has wider urban significance. More reliable demand forecasting can support better vehicle allocation and improve the spatial matching between supply and expected local demand \cite{li2024predictability,ye2021online}. It can also help reduce empty cruising or deadhead mileage, thereby improving operational and potentially energy efficiency \cite{kontou2020empty}. In a data-scarce or highly variable urban environment, a forecasting system must therefore be judged not only by average error metrics but also by its stability, interpretability, and ability to remain useful across heterogeneous operational contexts. This emphasis on operational realism gives the study both academic relevance and applied value.
 
 \section{Problem Definition and Research Challenges}
 
-Recent research on traffic and mobility prediction has increasingly moved toward spatiotemporal architectures that combine temporal sequence modelling with graph-based spatial learning.\cite{8903252} Temporal models such as recurrent neural networks and transformer variants are effective for extracting sequential dependencies\cite{info15090517，rnn_evolution_2024}, whereas graph neural networks offer a principled way to propagate information across related regions\cite{9046288}. Yet the The integration of these components is not straightforward. End-to-end spatiotemporal models can be highly effective for traffic forecasting because they jointly model spatial and temporal dependencies, and representative architectures such as DCRNN and Graph WaveNet have achieved strong results in this setting \cite{li2018dcrnn,jiang2022survey}. However, such graph-based deep models are often difficult to interpret, which limits their transparency in operational use \cite{garcia2023explainability}. In practical city-scale forecasting, there is therefore value in separating the problem into an initial temporal prediction stage and a subsequent spatial correction stage. This type of decoupled design is also supported by recent work showing that different latent traffic signals can be handled more effectively when spatial diffusion and inherent temporal components are modeled separately \cite{shao2022d2stgnn}. Such a design allows the first component to focus on modelling zone-specific temporal regularity while the second component exploits graph structure to refine predictions in a more modular and controlled manner.
+Recent research on traffic and mobility prediction has increasingly moved toward spatiotemporal architectures that combine temporal sequence modelling with graph-based spatial learning.\cite{8903252} Temporal models such as recurrent neural networks and transformer variants are effective for extracting sequential dependencies\cite{info15090517，rnn\_evolution\_2024}, whereas graph neural networks offer a principled way to propagate information across related regions\cite{9046288}. Yet the The integration of these components is not straightforward. End-to-end spatiotemporal models can be highly effective for traffic forecasting because they jointly model spatial and temporal dependencies, and representative architectures such as DCRNN and Graph WaveNet have achieved strong results in this setting \cite{li2018dcrnn,jiang2022survey}. However, such graph-based deep models are often difficult to interpret, which limits their transparency in operational use \cite{garcia2023explainability}. In practical city-scale forecasting, there is therefore value in separating the problem into an initial temporal prediction stage and a subsequent spatial correction stage. This type of decoupled design is also supported by recent work showing that different latent traffic signals can be handled more effectively when spatial diffusion and inherent temporal components are modeled separately \cite{shao2022d2stgnn}. Such a design allows the first component to focus on modelling zone-specific temporal regularity while the second component exploits graph structure to refine predictions in a more modular and controlled manner.
 
 Another important issue is uncertainty. Most prediction systems output a single point estimate, but for urban demand forecasting this is frequently insufficient, since recent studies have shown that spatiotemporal travel demand prediction should explicitly quantify predictive uncertainty rather than rely only on deterministic outputs \cite{zhuang2022sparse,wang2024probgnn}. Prediction reliability varies significantly across time and across regions. A confident prediction in a historically dense, stable zone should not be treated in the same way as a volatile estimate produced for a sparse zone with weak historical support \cite{zhuang2022sparse}. If uncertainty can be quantified explicitly, it can be used to guide later stages of the model and to reduce the influence of unreliable nodes during learning. Therefore, uncertainty is not merely an auxiliary diagnostic quantity; it can also serve as a useful signal for weighting, calibration, and robustness enhancement.
 
@@ -192,7 +192,7 @@ The uncertainty component further differentiates this framework from a standard 
 
 The graph refinement stage addresses the main limitation of independent temporal forecasting: lack of spatial correction. After the base model generates per-zone next-hour predictions, the second stage treats these values as priors and learns residual corrections over an origin-destination flow graph. The use of GraphSAGE is notable here because the model is not asked to predict demand from scratch on the graph. Instead, it learns how much the initial temporal estimate should be adjusted once spatial context is taken into account. This residual perspective lowers the burden placed on the graph model and makes the refinement process easier to interpret because improvements can be understood as structured corrections rather than opaque end-to-end remapping \cite{hamilton2017graphsage}.
 
-The use of an origin-destination flow graph rather than a purely geographic adjacency graph is also theoretically meaningful. A mobility system is shaped not only by physical proximity but by functional interaction. Two zones may be geographically near yet weakly related in taxi demand, while distant zones can exhibit strong dependence if substantial travel flow connects them. By constructing adjacency from an OD flow matrix, the project attempts to encode actual travel coupling rather than crude map neighbourhood alone. This choice aligns with the practical intuition that mobility demand propagates along usage structure, not merely spatial contiguity \cite{xue_2020_spatialtemporal,ke2021od}.
+The use of an origin-destination flow graph rather than a purely geographic adjacency graph is also theoretically meaningful. A mobility system is shaped not only by physical proximity but by functional interaction. Two zones may be geographically near yet weakly related in taxi demand, while distant zones can exhibit strong dependence if substantial travel flow connects them. By constructing adjacency from an OD flow matrix, the project attempts to encode actual travel coupling rather than crude map neighbourhood alone. This choice aligns with the practical intuition that mobility demand propagates along usage structure, not merely spatial contiguity \cite{xue\_2020\_spatialtemporal,ke2021od}.
 
 The rolling evaluation protocol is another defining feature of this study. Instead of training once and reporting static test results, the pipeline advances target time step by time step, recalculating predictions and metrics at each hour. This setup better resembles how forecasting systems are used in deployment, where the model must repeatedly produce near-future estimates as new time points arrive. Rolling evaluation is important not only for realism but also for diagnosis. It reveals whether performance is stable over time, whether certain hours are systematically harder than others, and whether the spatial refinement stage consistently improves over the temporal baseline.
 
@@ -228,7 +228,7 @@ The remainder of this thesis is organised as follows. Chapter~2 reviews related 
 	\chapter{Literature Review}
 \section{Introduction to the Literature Context}
 
-Urban mobility forecasting has become a central problem in intelligent transportation systems because accurate short-term demand estimates influence vehicle dispatching, idle cruising reduction, passenger waiting time, congestion management, and the overall operational efficiency of city-scale transport services \cite{liu2022survey,khalesian2024area}. In large metropolitan areas, taxi demand is not only highly dynamic but also strongly heterogeneous across space and time \cite{qian_2015_spatial,tang2019spatiotemporal}. Different urban regions exhibit distinct activity rhythms shaped by commuting peaks, nightlife, commercial density, tourism, and residential land use \cite{tang2019spatiotemporal}. At the same time, the temporal behaviour of demand is rarely governed by a single periodic pattern. Instead, it reflects a mixture of short-term fluctuation, daily repetition, weekly regularity, and longer-range seasonal tendencies, which makes hourly taxi demand forecasting a difficult spatiotemporal learning task rather than a conventional univariate time-series regression problem \cite{jiang2022survey,liao2022taxi}.
+Urban mobility forecasting has become a central problem in intelligent transportation systems because accurate short-term demand estimates influence vehicle dispatching, idle cruising reduction, passenger waiting time, congestion management, and the overall operational efficiency of city-scale transport services \cite{liu2022survey,khalesian2024area}. In large metropolitan areas, taxi demand is not only highly dynamic but also strongly heterogeneous across space and time \cite{qian\_2015\_spatial,tang2019spatiotemporal}. Different urban regions exhibit distinct activity rhythms shaped by commuting peaks, nightlife, commercial density, tourism, and residential land use \cite{tang2019spatiotemporal}. At the same time, the temporal behaviour of demand is rarely governed by a single periodic pattern. Instead, it reflects a mixture of short-term fluctuation, daily repetition, weekly regularity, and longer-range seasonal tendencies, which makes hourly taxi demand forecasting a difficult spatiotemporal learning task rather than a conventional univariate time-series regression problem \cite{jiang2022survey,liao2022taxi}.
 
 The challenge becomes more pronounced when the forecasting objective is defined at the level of individual Taxi Zones. Fine-grained zone-level prediction is practically useful because dispatch systems, relocation strategies, and local service balancing all depend on geographically resolved demand estimation \cite{khalesian2024area,riley2020dispatch}. However, a disaggregated formulation also introduces additional statistical difficulty. Some zones generate abundant historical observations, while others are comparatively sparse or irregular. In low-activity regions, the observed series may contain many zero or near-zero counts interspersed with occasional surges, making the learning problem noisy and unstable \cite{zhuang2022sparse}. In high-activity districts, by contrast, the model must handle stronger amplitude variation and potentially sharper peak transitions, requiring effective modelling of complex spatial-temporal dependence \cite{wu2019graph,huang2022dstgnn}. A forecasting framework that performs well across all zones therefore needs to balance sensitivity to local temporal dynamics with robustness to data sparsity and uncertainty.
 
@@ -395,35 +395,848 @@ At the same time, the literature review makes clear that the project is not meth
 
 In summary, the reviewed literature provides a strong rationale for the architecture chosen in this thesis. It supports the move from traditional zone-wise forecasting to deep multi-scale temporal learning, from isolated local prediction to graph-based spatial refinement, from point prediction to confidence-aware modelling, and from static evaluation to rolling deployment-style assessment with continual adaptation \cite{lim2021survey,jiang2022survey,hewamalage2022pitfalls}. It also provides a principled basis for critiquing the current implementation and defining the next methodological questions. The thesis therefore stands on firm conceptual ground: it is responding to genuine open issues in spatiotemporal forecasting rather than assembling components arbitrarily. The following methodology chapter will build on this literature context by formalising the problem and detailing how the proposed two-stage, confidence-weighted multi-scale framework is constructed.
 	
-	\chapter{Methodology}
-	\section{Problem Formulation}
-	An example equation:
-	\begin{equation}
-		y = f(x)
-	\end{equation}
-	
-	\section{Model Architecture}
-	You can insert figures like this:
+\chapter{Methodology}
 
-	
+\section{Overview}
+
+This chapter presents the methodological design of the proposed forecasting system for hourly taxi demand prediction over New York City Taxi Zones. The aim of the method is not merely to fit a single prediction model, but to construct an end-to-end forecasting pipeline that reflects the practical requirements of real deployment. The framework is therefore organised as a rolling, two-stage architecture. In the first stage, each Taxi Zone is modelled independently by a multi-scale temporal network that predicts demand for the next hour. In the second stage, the resulting zone-level predictions are refined by a graph neural network that introduces spatial consistency using an origin-destination flow graph. Between these two stages, uncertainty-aware confidence estimation is used to quantify the reliability of each zone-level prediction and to control how strongly the graph refinement stage should trust each node.
+
+Methodologically, the framework combines four central ideas. First, it treats urban mobility demand as a temporal process with meaningful structure at multiple scales, rather than as a sequence that can be represented adequately by a single recent window. Second, it models each zone separately at the temporal stage, thereby preserving local heterogeneity and avoiding the assumption that all urban regions should share identical temporal parameters. Third, it uses Monte Carlo Dropout and additional reliability signals to build a node-level confidence mechanism that can distinguish between stable and unstable predictions. Fourth, it treats spatial learning as a residual correction problem rather than an entirely separate prediction task, allowing graph refinement to improve an existing temporal prior rather than replacing it.
+
+The methodology has been designed to support three goals simultaneously. The first is predictive accuracy, measured by how closely the forecasts match the observed number of trips in each zone at the target hour. The second is robustness, especially under sparse data or unstable temporal dynamics, where uncertainty and graph structure may be particularly informative. The third is operational realism, achieved through a rolling evaluation protocol in which predictions are repeatedly generated as time advances hour by hour. The remainder of this chapter is organised as follows. Section~\ref{sec:problem-setup} formalises the forecasting problem and defines the rolling prediction setting. Section~\ref{sec:data-representation} describes the data representation, preprocessing operations, and the construction of temporal sequences and graph structure. Section~\ref{sec:temporal-stage} presents the first-stage multi-scale temporal model, including the architecture of the branch encoders, feature fusion, prediction mechanism, and training strategy. Section~\ref{sec:uncertainty-confidence} explains the uncertainty estimation procedure and the construction of the confidence score that links the temporal and graph stages. Section~\ref{sec:graph-stage} introduces the GraphSAGE residual refinement model, its inputs, learning objective, and prediction logic. Section~\ref{sec:rolling-protocol} describes the rolling protocol and the interaction between checkpoint reuse, optional incremental adaptation, and repeated forecasting. Section~\ref{sec:methodological-discussion} concludes the chapter by discussing the methodological rationale, strengths, and deliberate limitations of the current design.
+
+\section{Problem Setup}
+\label{sec:problem-setup}
+
+\subsection{Forecasting Objective}
+
+Let the urban system be partitioned into a set of Taxi Zones
+\[
+\mathcal{Z} = \{z\_1, z\_2, \dots, z\_N\},
+\]
+where each zone corresponds to a predefined administrative or operational region used in the taxi dataset. For each zone \(z\_i\), the raw data consist of time-stamped trip records with pickup locations. These records are aggregated into hourly counts, producing a univariate temporal sequence
+\[
+x\_i(1), x\_i(2), \dots, x\_i(T),
+\]
+where \(x\_i(t)\) denotes the number of taxi pickups observed in zone \(z\_i\) during hour \(t\).
+
+The central forecasting task is next-step prediction at hourly granularity. Given the observed history for zone \(z\_i\) up to time \(t\), the system aims to predict
+\[
+\hat{x}\_i(t+1),
+\]
+the demand for the next hour. More generally, for a target timestamp \(\tau\), the prediction problem can be written as
+\[
+\hat{x}\_i(\tau) = f\_i\big(\mathcal{H}\_i(\tau)\big),
+\]
+where \(\mathcal{H}\_i(\tau)\) denotes the history available for zone \(z\_i\) strictly before \(\tau\), and \(f\_i(\cdot)\) denotes the temporal predictor associated with that zone.
+
+This thesis does not formulate the temporal stage as a direct multivariate city-wide forecasting model. Instead, the base prediction stage is defined per zone. That is, each zone maintains its own model parameters and its own training history, while spatial interaction is handled later by a separate graph refinement stage. The rationale is that a zone-level forecasting problem has highly local temporal regularities, often shaped by specific functional roles such as residential demand, airport traffic, nightlife, or commuter concentration. Preserving this heterogeneity is methodologically desirable because it reduces the risk that a single monolithic temporal model collapses distinct demand processes into one shared representation.
+
+\subsection{Two-Stage Forecasting Formulation}
+
+The overall method is formulated as a two-stage architecture.
+
+In the first stage, a temporal base predictor produces an initial forecast for each zone:
+\[
+\tilde{x}\_i(\tau) = f\_i\big(\mathcal{H}\_i(\tau)\big).
+\]
+This prediction is accompanied by an uncertainty estimate and several auxiliary reliability indicators. The collection of zone-level temporal predictions across all zones forms a vector
+\[
+\tilde{\mathbf{x}}(\tau) =
+[\tilde{x}\_1(\tau), \tilde{x}\_2(\tau), \dots, \tilde{x}\_N(\tau)]^\top.
+\]
+
+In the second stage, these temporal predictions are treated as priors on a graph whose nodes correspond to Taxi Zones and whose edges reflect mobility coupling derived from origin-destination flows. The graph model does not predict demand from scratch. Instead, it learns a residual correction:
+\[
+r\_i(\tau) = g\_i\big(\tilde{\mathbf{x}}(\tau), \mathbf{A}, \mathbf{c}(\tau), \mathbf{h}(\tau)\big),
+\]
+where \(\mathbf{A}\) denotes the adjacency structure of the graph, \(\mathbf{c}(\tau)\) denotes node-level confidence values, and \(\mathbf{h}(\tau)\) denotes supplementary historical features. The final refined prediction is therefore
+\[
+\hat{x}\_i(\tau) = \tilde{x}\_i(\tau) + r\_i(\tau).
+\]
+
+This residual formulation is important. It assumes that the temporal stage already captures most of the signal that is specific to each zone, while the graph stage contributes structured corrections that account for spatial relationships and cross-zone consistency. The graph model is therefore tasked with learning what the temporal stage missed, rather than rediscovering the entire demand signal from the graph alone. This reduces modelling burden and makes the role of the graph stage more interpretable.
+
+\subsection{Rolling Forecasting Setting}
+
+The forecasting task is evaluated under a rolling protocol rather than a single static train/test split. Let \(\tau\_1, \tau\_2, \dots, \tau\_K\) denote a sequence of target timestamps separated by one hour. At each target hour \(\tau\_k\), the system reconstructs the temporal input windows, generates predictions for all eligible zones, computes confidence scores, applies graph refinement, and stores both zone-level outputs and aggregate error metrics.
+
+Formally, for each rolling step \(k\), the procedure is
+\[
+\mathcal{H}\_i(\tau\_k) \rightarrow \tilde{x}\_i(\tau\_k)
+\rightarrow c\_i(\tau\_k)
+\rightarrow \hat{x}\_i(\tau\_k),
+\]
+for all zones \(z\_i\). This setup is intended to mimic a realistic forecasting workflow, where predictions must be generated repeatedly as time moves forward. It is also methodologically useful because it exposes temporal drift, variation in uncertainty, and the stability of forecasting performance across consecutive operating hours.
+
+\subsection{Target Variables and Evaluation Quantities}
+
+The primary target variable is the observed hourly taxi pickup count in each zone. Let \(y\_i(\tau)\) denote the ground-truth count for zone \(z\_i\) at target hour \(\tau\). The temporal baseline prediction is \(\tilde{x}\_i(\tau)\), and the graph-refined prediction is \(\hat{x}\_i(\tau)\).
+
+At the graph stage, the supervised signal is the residual
+\[
+\Delta\_i(\tau) = y\_i(\tau) - \tilde{x}\_i(\tau),
+\]
+rather than the raw target \(y\_i(\tau)\). This is consistent with the residual refinement philosophy described above.
+
+For evaluation, the main scalar error measures are mean absolute error and mean squared error. For a set of valid zones \(\mathcal{V}\_\tau\) at time \(\tau\), the baseline MAE is
+\[
+\text{MAE}\_{\text{base}}(\tau)
+= \frac{1}{|\mathcal{V}\_\tau|}
+\sum\_{i \in \mathcal{V}\_\tau}
+|\tilde{x}\_i(\tau) - y\_i(\tau)|,
+\]
+and the refined MAE is
+\[
+\text{MAE}\_{\text{ref}}(\tau)
+= \frac{1}{|\mathcal{V}\_\tau|}
+\sum\_{i \in \mathcal{V}\_\tau}
+|\hat{x}\_i(\tau) - y\_i(\tau)|.
+\]
+Similarly, the corresponding mean squared errors are
+\[
+\text{MSE}\_{\text{base}}(\tau)
+= \frac{1}{|\mathcal{V}\_\tau|}
+\sum\_{i \in \mathcal{V}\_\tau}
+(\tilde{x}\_i(\tau) - y\_i(\tau))^2
+\]
+and
+\[
+\text{MSE}\_{\text{ref}}(\tau)
+= \frac{1}{|\mathcal{V}\_\tau|}
+\sum\_{i \in \mathcal{V}\_\tau}
+(\hat{x}\_i(\tau) - y\_i(\tau))^2.
+\]
+
+These metrics are stored at each rolling step and can also be aggregated across the full rolling horizon to provide overall performance summaries.
+
+\section{Data Representation and Preprocessing}
+\label{sec:data-representation}
+
+\subsection{Raw Data and Hourly Aggregation}
+
+The raw taxi dataset contains individual trip records with at least two essential attributes for this work: pickup timestamp and pickup zone identifier. Since the objective is hourly zone-level demand forecasting, the raw event stream is transformed into a panel of hourly counts. Each trip record contributes one count to the corresponding zone and hour, and all records are aggregated by hour after flooring the timestamps to hourly precision.
+
+For each zone \(z\_i\), this produces a sparse sequence of observed counts over time. However, a forecasting model requires dense temporal input, including explicit zeros for hours in which no pickups were recorded. Therefore, the methodology constructs dense hourly timelines over the relevant historical range. Missing hours are reintroduced with count zero, ensuring that the sequence used by the temporal model preserves both activity and inactivity patterns. This is especially important in sparse zones, where the absence of events is itself informative \cite{zhuang2022sparse,lyu2021bigdata}.
+
+\subsection{Zone Filtering and Data Validity}
+
+Not all Taxi Zones are equally suitable for modelling. In practical taxi datasets, some zones may correspond to special-purpose regions, missing lookup entries, irregular traffic patterns, or insufficient data coverage. The methodology therefore allows the exclusion of selected zones during preprocessing. This prevents invalid or unstable zones from contaminating the temporal model, confidence construction, or graph refinement stage.
+
+The filtering step is intentionally performed early in the pipeline. Once excluded, a zone does not contribute to temporal training, rolling evaluation, or graph refinement. This ensures consistency across all later stages. From a methodological point of view, such filtering reflects a realistic data curation step in applied mobility forecasting, where certain regions may be unusable because of missing metadata, unstable counts, or lack of meaningful demand \cite{lyu2021bigdata}.
+
+\subsection{Temporal Granularity and Historical Windows}
+
+The system operates at hourly granularity throughout. This choice balances temporal detail and computational tractability. Minute-level modelling would be too sparse and noisy for many zones, while daily aggregation would remove the within-day structure that is central to taxi demand \cite{tang2019spatiotemporal,liao2022taxi}. Hourly aggregation preserves immediate fluctuations, daily cycles, and longer periodic patterns in a form that can be handled efficiently by recurrent and attention-based models.
+
+A key methodological decision is to represent the historical sequence at multiple time scales. Instead of feeding one fixed look-back window into a single sequence encoder, the framework constructs four temporal contexts:
+\begin{itemize}
+	\item a short-term context of the most recent 1 hour,
+	\item a daily context of the most recent 24 hours,
+	\item a weekly context of the most recent 168 hours,
+	\item and a monthly context of the most recent 720 hours.
+\end{itemize}
+
+These windows are not arbitrary. The 1-hour view captures immediate local momentum. The 24-hour view reflects intra-day structure and recent daily periodicity. The 168-hour view introduces weekly repetition and the weekday--weekend distinction. The 720-hour view provides roughly one month of context and can represent slower trend evolution. The methodology assumes that these time scales contain complementary information and that explicitly encoding them is preferable to relying on a single model to infer all relevant horizons from one undifferentiated sequence \cite{liao2022taxi,huang2021multiresolution,lim2021survey}.
+
+\subsection{Construction of Dense Zone Series}
+
+For each zone and each forecasting context end time, a dense hourly series is constructed over the relevant history. Let \(\tau\) denote a target hour and let the forecasting horizon be one step. Then the last available hour before prediction is
+\[
+\tau^- = \tau - 1 \text{ hour}.
+\]
+The dense zone series is built up to \(\tau^-\). To provide sufficient context for the monthly branch and for sliding-window training, the historical extraction range is extended beyond the basic 720-hour input window. In effect, the method reconstructs a sufficiently long dense hourly sequence ending at \(\tau^-\), allowing both model training windows and the final inference window to be assembled without any future leakage.
+
+For sparse zones, this dense reconstruction is crucial. Without it, the model would see only event times and could not distinguish between a genuinely inactive period and missing data. With explicit zero filling, the temporal encoders can learn the difference between peak hours, moderate demand, and prolonged inactivity \cite{zhuang2022sparse}.
+
+\subsection{Scaling and Temporal Integrity}
+
+Neural sequence models are sensitive to the scale of their inputs. Since demand counts vary considerably across zones, the framework scales each zone independently before building model inputs. A Min--Max scaling transformation is applied:
+\[
+x\_i^{\text{scaled}}(t)
+=
+\frac{x\_i(t)-x\_i^{\min}}{x\_i^{\max}-x\_i^{\min}},
+\]
+with suitable safeguards for degenerate cases such as constant sequences. The use of zone-specific scaling matches the per-zone forecasting design. A high-demand airport zone and a low-demand peripheral zone may have very different count ranges, and scaling them jointly would distort the learning problem.
+
+A methodological requirement here is temporal integrity. The scaler must be fitted only on historical observations available before the target hour. Let \(\tau\) be the prediction time. Then the scaler for forecasting \(\tau\) is fitted on data strictly earlier than \(\tau\). This ensures that neither the scale parameters nor the input windows leak future information. This seemingly technical detail is methodologically important because improper scaling is a common source of hidden leakage in time-series experiments \cite{hewamalage2022pitfalls,cerqueira2020evaluating}.
+
+\subsection{Sliding-Window Sample Generation}
+
+After dense reconstruction and scaling, training samples are produced by sliding windows over the historical series. Let \(L = 720\) denote the total monthly context length and let the prediction horizon be \(H=1\). For each valid starting position \(s\), the full input window is
+\[
+[x\_i^{\text{scaled}}(s), x\_i^{\text{scaled}}(s+1), \dots, x\_i^{\text{scaled}}(s+L-1)],
+\]
+and the corresponding target is
+\[
+y\_i^{\text{scaled}}(s)
+=
+x\_i^{\text{scaled}}(s+L).
+\]
+
+From the full monthly window, the shorter branch windows are extracted from its most recent part:
+\begin{align*}
+	\mathbf{x}^{1h}\_i(s) &= [x\_i^{\text{scaled}}(s+L-1)],\\
+	\mathbf{x}^{1d}\_i(s) &= [x\_i^{\text{scaled}}(s+L-24), \dots, x\_i^{\text{scaled}}(s+L-1)],\\
+	\mathbf{x}^{1w}\_i(s) &= [x\_i^{\text{scaled}}(s+L-168), \dots, x\_i^{\text{scaled}}(s+L-1)],\\
+	\mathbf{x}^{1m}\_i(s) &= [x\_i^{\text{scaled}}(s), \dots, x\_i^{\text{scaled}}(s+L-1)].
+\end{align*}
+
+This construction means that all branches predict the same next-hour target but view the historical sequence at different temporal horizons. The branch inputs are therefore temporally aligned and complementary.
+
+\subsection{Graph Construction from Origin--Destination Flow}
+
+The spatial component of the framework is built from an origin--destination flow matrix rather than a purely geographic adjacency matrix. Each node represents a Taxi Zone, and an edge is created between two zones if the corresponding entry in the OD flow matrix indicates non-zero interaction. Let \(\mathbf{A} \in \mathbb{R}^{N \times N}\) denote the zone-by-zone flow matrix. The graph connectivity used by the graph neural network is derived as
+\[
+A\_{ij}^{\text{bin}} =
+\begin{cases}
+	1, & \text{if } A\_{ij} > 0,\\
+	0, & \text{otherwise}.
+\end{cases}
+\]
+
+This binary adjacency is then converted into sparse edge-index form for graph learning. Methodologically, the choice of OD flow over geographic adjacency is important. Geographical closeness does not necessarily correspond to mobility coupling. Two neighbouring zones may have weak travel exchange, while two zones that are geographically farther apart may exhibit strong interaction because of commuting, airport trips, or major transit connections \cite{ke2021od,jiang2022survey}. The OD graph therefore encodes functional linkage rather than mere cartographic proximity.
+
+At the same time, the current graph construction simplifies the original flow matrix by thresholding it into connectivity. The existence of interaction is retained, but the exact edge magnitude is not explicitly exploited inside the current GraphSAGE message-passing operator.
+
+\subsection{Auxiliary Historical Features for Graph Refinement}
+
+In addition to the base temporal prediction and the confidence score, the graph refinement stage receives auxiliary node-level history summaries. These features are simple averages of the zone demand over selected windows before the target hour:
+\begin{align*}
+	m\_i^{24h}(\tau) &= \frac{1}{24}\sum\_{h=1}^{24} x\_i(\tau-h),\\
+	m\_i^{168h}(\tau) &= \frac{1}{168}\sum\_{h=1}^{168} x\_i(\tau-h),\\
+	m\_i^{720h}(\tau) &= \frac{1}{720}\sum\_{h=1}^{720} x\_i(\tau-h).
+\end{align*}
+
+These features serve as low-dimensional summaries of recent demand history. Their role is different from that of the multi-scale temporal base model. The temporal model already processes raw sequences to generate the baseline forecast. The graph stage, however, operates on a single graph snapshot at the target hour and therefore benefits from concise contextual descriptors that summarise whether the current zone is typically busy or quiet over short, medium, and long horizons \cite{lyu2021bigdata,lim2021survey}. Before being used by the graph network, these history features are stabilised by replacing missing values and applying a \(\log(1+x)\) transform \cite{akram2023counts}.
+
+
+\section{Stage One: Multi-Scale Temporal Forecasting}
+\label{sec:temporal-stage}
+
+\subsection{Motivation for a Multi-Branch Design}
+
+The first stage of the method is a multi-scale temporal predictor trained independently for each zone. The central design hypothesis is that urban taxi demand cannot be represented adequately by one temporal horizon alone. A purely short-window model may react to recent fluctuations but fail to preserve weekly repetition or slower trends. A purely long-window model may encode broader context but blur immediate local shifts. The methodology therefore uses a multi-branch design in which distinct encoders are assigned to different temporal horizons and their representations are fused before the final prediction step \cite{liao2022taxi,huang2021multiresolution,lim2021survey}.
+
+This architecture is also shaped by the practical nature of the forecasting target. Because the task is one-step-ahead hourly prediction, the system does not need a full sequence-to-sequence decoder. Instead, it needs a compact but expressive representation of recent dynamics that can map directly to the next hour. The branch encoders and fusion module are therefore designed to extract complementary embeddings rather than to reconstruct the whole future trajectory.
+
+\subsection{Per-Zone Temporal Modelling}
+
+Each Taxi Zone is assigned its own temporal forecasting model. The parameter set for each temporal model is zone-specific. The model is trained on the historical sequence of that zone only, and its checkpoint is stored independently from the checkpoints of other zones.
+
+This lets each model specialise to the local temporal signature of its zone, avoids forcing all regions into one shared temporal representation, and supports independent checkpoint reuse with optional incremental updates. The cost is that the system must maintain many separate models rather than one global model, but the framework accepts this trade-off because local specialisation is prioritised at the temporal stage \cite{lim2021survey,zhuang2022sparse}.
+
+\subsection{Branch Inputs}
+
+For each zone, a training or inference example consists of four temporally aligned inputs:
+\[
+\mathbf{x}^{1h}, \quad
+\mathbf{x}^{1d}, \quad
+\mathbf{x}^{1w}, \quad
+\mathbf{x}^{1m}.
+\]
+These correspond to the 1-hour, 1-day, 1-week, and 1-month contexts described earlier. Each input is represented as a univariate sequence with one feature channel.
+
+The monthly branch retains the full 720-hour window, the daily and weekly branches use the most recent 24 and 168 elements, and the short branch uses only the most recent hour. Although a length-1 branch is minimal, it serves as the explicit carrier of immediate local momentum when combined with the fused longer-term trend representation inside the GRU pathway.
+
+\subsection{Daily and Weekly Encoders}
+
+The daily and weekly branches are encoded with LSTM networks. For the daily branch, the sequence \(\mathbf{x}^{1d}\) is passed through an LSTM:
+\[
+\mathbf{h}^{1d} = \text{LSTM}\_{1d}(\mathbf{x}^{1d}),
+\]
+and the final hidden state is used as the branch embedding:
+\[
+\mathbf{e}^{1d} = \mathbf{h}^{1d}\_{\text{final}}.
+\]
+Similarly, the weekly branch is encoded as
+\[
+\mathbf{e}^{1w} = \text{LSTM}\_{1w}(\mathbf{x}^{1w})\_{\text{final}}.
+\]
+
+The use of LSTMs for the 24-hour and 168-hour windows is appropriate because these horizons require ordered-memory modelling but remain short enough for stable recurrent encoding. The daily branch captures within-day structure, while the weekly branch captures weekday--weekend repetition and broader weekly routines \cite{hochreiter1997lstm,jiang2022survey}.
+
+\subsection{Monthly Encoder}
+
+The longest branch, representing roughly one month of hourly history, is encoded differently. Instead of another recurrent network, the methodology uses a Transformer-based encoder after projecting the scalar input into a hidden space. Let the monthly sequence be \(\mathbf{x}^{1m}\). It is first mapped by a linear projection:
+\[
+\mathbf{u}^{1m}\_t = \mathbf{W}\_p x^{1m}\_t + \mathbf{b}\_p,
+\]
+producing a hidden representation at each time step. The projected sequence is then processed by a Transformer encoder:
+\[
+\mathbf{H}^{1m} = \text{Transformer}(\mathbf{U}^{1m}),
+\]
+and the final time-step output is taken as the monthly branch embedding:
+\[
+\mathbf{e}^{1m} = \mathbf{H}^{1m}\_{\text{final}}.
+\]
+
+The methodological reason for assigning the longest horizon to a Transformer is that self-attention can represent long-range dependencies without forcing information to flow through a fully recurrent chain. Over a 720-hour window, slow drifts and distant periodic cues may be easier to retain in an attention-based representation than in a standard recurrent state alone \cite{vaswani2017attention,zhao2026transformers,kim2025dltimeseries}.
+
+\subsection{Branch-Level Dropout and Representation Stability}
+
+After the branch embeddings are obtained, dropout is applied independently to each branch representation. This serves two purposes. First, it acts as regularisation during training by discouraging over-reliance on any single hidden component. Second, and more importantly for this thesis, it enables Monte Carlo Dropout during inference. Because dropout remains active when stochastic forward passes are required, the variability of the resulting predictions and branch embeddings can be used to estimate uncertainty and branch-level stability \cite{gal2016dropout}.
+
+The methodology therefore treats dropout not only as a standard regularisation device but as an integral component of the confidence estimation strategy. This dual role links the temporal predictor directly to the uncertainty and confidence mechanism described later \cite{gal2016dropout}.
+
+\subsection{Fusion of Longer-Term Temporal Contexts}
+
+The daily, weekly, and monthly embeddings are concatenated and passed through a linear fusion layer:
+\[
+\mathbf{e}^{\text{trend}}
+=
+\phi\big(
+\mathbf{W}\_f
+[
+\mathbf{e}^{1d}; \mathbf{e}^{1w}; \mathbf{e}^{1m}
+]
++
+\mathbf{b}\_f
+\big),
+\]
+where \(\phi(\cdot)\) denotes the hidden nonlinearity implied by subsequent processing and the fusion layer compresses the concatenated multi-scale trend information into a single trend vector.
+
+This fused representation is conceptually important. It is not intended to replace the short-term branch. Instead, it acts as a context vector summarising medium- and long-term behaviour. The design assumes that immediate next-hour prediction should be driven by both local momentum and a broader temporal trend state. The fusion layer therefore converts the three longer-horizon branch embeddings into a unified condition that can support final short-term prediction \cite{huang2021multiresolution,lim2021tft}.
+
+\subsection{GRU-Based Output Pathway}
+
+The final prediction pathway is based on a GRU. The fused trend vector is repeated across the short sequence length and concatenated with the 1-hour branch input:
+\[
+\mathbf{g}\_t = [x^{1h}\_t ; \mathbf{e}^{\text{trend}}],
+\]
+which forms the GRU input. Since the short branch length is one in the current implementation, the GRU effectively receives a compact representation that combines the most recent observed demand value with the aggregated trend embedding extracted from the longer branches.
+
+The GRU then produces a hidden representation
+\[
+\mathbf{h}^{1h}\_{\text{gru}} = \text{GRU}(\mathbf{g}),
+\]
+and the final prediction is obtained via a linear output layer:
+\[
+\hat{y}^{\text{scaled}} = \mathbf{W}\_o \mathbf{h}^{1h}\_{\text{final}} + b\_o.
+\]
+
+This design is slightly unusual compared with standard recurrent forecasting architectures, because the GRU is not asked to process the entire long history directly. Instead, it acts as the final short-term decision mechanism conditioned on fused longer-term context. Methodologically, this makes the architecture modular: long-term dependencies are handled by branch encoders, while the GRU focuses on converting recent local state and broader trend information into a one-step-ahead prediction \cite{cho2014gru,kim2025dltimeseries}.
+
+\subsection{Prediction in Original Scale}
+
+The model outputs predictions in scaled space, because the training samples are built after Min--Max normalisation. To obtain demand in the original count space, the inverse scaling transform is applied:
+\[
+\tilde{x}\_i(\tau)
+=
+\text{Scale}^{-1}(\hat{y}^{\text{scaled}}\_i(\tau)).
+\]
+Because scaling is fitted separately for each zone and each rolling context using only past observations, the inverse transform remains consistent with the temporally valid training and inference setup.
+
+\subsection{Training Objective for the Temporal Stage}
+
+The temporal stage is trained as a supervised next-step regressor. For a batch of training windows from one zone, let the scaled predictions be \(\hat{y}\_b\) and the scaled targets be \(y\_b\). The main loss is mean squared error:
+\[
+\mathcal{L}\_{\text{temp}}
+=
+\frac{1}{B}\sum\_{b=1}^{B}
+(\hat{y}\_b - y\_b)^2.
+\]
+
+The code structure allows for auxiliary logic related to branch uncertainty, but the dominant supervised objective is still the main one-step regression loss. This choice is reasonable because the ultimate target is a scalar hourly count and the branch encoders are all optimised jointly to minimise next-step prediction error.
+
+\subsection{Optimisation and Early Stopping}
+
+Temporal training uses Adam optimisation with a fixed learning rate and an early-stopping mechanism controlled by patience. Let \(\ell^{(e)}\) denote the training loss at epoch \(e\). The best observed loss is tracked, and training terminates if no improvement is seen over a specified number of epochs. This prevents unnecessary optimisation once the zone-specific model has converged and reduces the chance of overfitting, especially in zones with limited training variation.
+
+Because the temporal stage is performed independently per zone, training efficiency is important. Early stopping reduces wasted optimisation and makes checkpoint generation more practical across many zones. This is one of the reasons a relatively simple next-step objective and moderate hidden dimension are sufficient in the current framework.
+
+\subsection{Checkpointing and Model Persistence}
+
+After training, each zone model is saved together with its scaler and metadata describing the latest context end included in training. This creates a persistent forecasting state for that zone. During later rolling steps, if the model already exists, the framework can reuse it rather than retraining from scratch. The methodological benefit is that rolling prediction becomes much closer to a real operational scenario, where models are not typically rebuilt every hour without reason \cite{hewamalage2022pitfalls,cavalcante2024review}.
+
+The persistent design also enables a clean distinction between the baseline persistent mode and the optional incremental mode. In persistent mode, the saved model is reused as-is. In incremental mode, the checkpoint can be updated using new observations when new rolling windows arrive. This will be discussed in Section~\ref{sec:rolling-protocol}.
+
+\section{Uncertainty Estimation and Confidence Construction}
+\label{sec:uncertainty-confidence}
+
+\subsection{Role of Uncertainty in the Framework}
+
+A key methodological feature of the framework is that predictive uncertainty is not treated merely as an auxiliary diagnostic. Instead, it is actively used to influence downstream graph learning. This is important because the graph stage should not trust every baseline prediction equally. Some zone-level predictions are likely to be stable and informative, while others may be noisy due to sparse history, volatile local demand, or disagreement with neighbouring zones \cite{zhuang2022sparse,wang2024probgnn}. The confidence mechanism is designed to distinguish between these cases.
+
+The confidence assigned to each zone at each rolling step is built from three sources:
+\begin{enumerate}
+	\item a prior score reflecting how much historical data the zone has,
+	\item a stability score derived from Monte Carlo Dropout variance,
+	\item and a neighbourhood consistency score that compares the prediction to graph neighbours.
+\end{enumerate}
+These components are then fused into a single confidence value that is used as a node-level weight in the graph stage \cite{wang2024gnnuncertaintysurvey,park2022confidenceaware}.
+
+\subsection{Monte Carlo Dropout for Predictive Uncertainty}
+
+Monte Carlo Dropout is used to estimate predictive uncertainty in the temporal stage. During inference, dropout remains active, and the same input is passed through the network multiple times. Let
+\[
+\hat{y}^{(1)}, \hat{y}^{(2)}, \dots, \hat{y}^{(M)}
+\]
+denote the scaled predictions from \(M\) stochastic forward passes. The predictive mean is
+\[
+\bar{y}
+=
+\frac{1}{M}\sum\_{m=1}^{M}\hat{y}^{(m)},
+\]
+and the predictive standard deviation is
+\[
+\sigma
+=
+\sqrt{
+	\frac{1}{M}\sum\_{m=1}^{M}
+	(\hat{y}^{(m)} - \bar{y})^2
+}.
+\]
+
+The mean is inverse-transformed to obtain the final point prediction in the original scale. The standard deviation is also mapped back to the original scale using the scaler's data range. This produces a quantity with a direct interpretation in terms of demand-count variability.
+
+Monte Carlo Dropout is attractive here because it does not require a separate probabilistic network or an ensemble of models. It reuses the same architecture and keeps uncertainty estimation computationally feasible even when many zone-specific models must be maintained \cite{gal2016dropout}.
+
+\subsection{Branch-Embedding Variability}
+
+In addition to predictive variance, the framework can inspect the variability of branch embeddings under Monte Carlo sampling. Let
+\[
+\mathbf{e}^{1h,(m)}, \mathbf{e}^{1d,(m)}, \mathbf{e}^{1w,(m)}, \mathbf{e}^{1m,(m)}
+\]
+be the branch embeddings from the \(m\)-th stochastic forward pass. Their variance across samples reflects how stable each temporal branch representation is under dropout-induced perturbation.
+
+Although the current downstream confidence mechanism uses overall predictive variance rather than a full branch-specific weighting rule, this embedding variability is still methodologically meaningful. It confirms that the uncertainty process is sensitive not only to the final scalar prediction but also to internal representational instability \cite{gal2016dropout}.
+
+\subsection{Historical Prior Score}
+
+The first component of the confidence mechanism is a prior score that measures how much historical evidence is available for each zone. Zones with richer history are generally easier to model than zones with chronically sparse counts \cite{zhuang2022sparse}. Let \(n\_i\) denote the total number of records or effective count volume associated with zone \(z\_i\) over the available historical data. The prior score is constructed by applying a log transform and min--max normalisation:
+\[
+p\_i
+=
+\frac{\log(1+n\_i)-\min\_j \log(1+n\_j)}
+{\max\_j \log(1+n\_j)-\min\_j \log(1+n\_j)}.
+\]
+This score is then rescaled away from exact zero, so that every zone retains at least a minimal confidence level.
+
+The prior score does not depend on the current rolling step. It is a structural quantity reflecting the overall historical sufficiency of a zone. Methodologically, it acts as a regularising anchor: even if a current prediction appears stable under Monte Carlo sampling, a chronically sparse zone should still not be treated with the same confidence as a zone supported by much richer history.
+
+\subsection{Stability Score from Predictive Variance}
+
+The second confidence component is a stability score derived from the predictive variance at the current rolling step. Let \(v\_i(\tau)\) denote the Monte Carlo variance for zone \(z\_i\) at time \(\tau\). Higher variance indicates lower stability. The framework maps this to a score in \((0,1]\) using an exponential decay:
+\[
+s\_i(\tau)
+=
+\exp\Big(
+-\frac{v\_i(\tau)}{3\lambda\_\tau}
+\Big),
+\]
+where \(\lambda\_\tau\) is a scale factor derived from the median variance across zones at that step. The resulting value is clipped to a small positive lower bound and 1.0 as an upper bound.
+
+This design has two advantages. First, it produces a relative, step-aware notion of stability: what counts as ``high variance'' is interpreted in relation to the current global variance scale. Second, it avoids an overly harsh penalty for moderate uncertainty while still strongly down-weighting extremely unstable predictions. This is appropriate for urban demand forecasting, where some uncertainty is inevitable and should not automatically invalidate a prediction \cite{wang2024probgnn,gal2016dropout}.
+
+\subsection{Neighbourhood Consistency Score}
+
+The third component measures whether the prediction of a zone is consistent with the predictions of its graph neighbours. Let \(\mathcal{N}(i)\) denote the set of neighbouring zones of \(z\_i\) in the OD graph. For zone \(i\) at time \(\tau\), let \(\tilde{x}\_i(\tau)\) be the baseline prediction and let
+\[
+\mu\_i(\tau)
+=
+\frac{1}{|\mathcal{N}(i)|}
+\sum\_{j \in \mathcal{N}(i)}
+\tilde{x}\_j(\tau)
+\]
+be the mean prediction of its neighbours. A dispersion-adjusted scale is computed from the neighbour predictions and the global prediction magnitudes. The neighbourhood consistency score is then defined through another exponential mapping:
+\[
+n\_i(\tau)
+=
+\exp\Big(
+-\frac{|\tilde{x}\_i(\tau)-\mu\_i(\tau)|}{d\_i(\tau)}
+\Big),
+\]
+where \(d\_i(\tau)\) is a denominator incorporating neighbour standard deviation, local scale, and a global scale term.
+
+This quantity is high when the zone prediction agrees with its graph neighbours and lower when it departs strongly from the local neighbourhood pattern. It should not be interpreted as a strict smoothness requirement, because legitimate local spikes can occur. Instead, it acts as a probabilistic reliability indicator: an extreme deviation from neighbouring forecasts is more likely to be suspicious when the local neighbourhood itself is comparatively coherent \cite{jiang2022survey,park2022confidenceaware}.
+
+\subsection{Confidence Fusion}
+
+The three confidence components are fused multiplicatively in log space:
+\[
+c\_i(\tau)
+=
+\exp\Big(
+w\_p \log p\_i
++
+w\_s \log s\_i(\tau)
++
+w\_n \log n\_i(\tau)
+\Big),
+\]
+where \(w\_p\), \(w\_s\), and \(w\_n\) are non-negative weights summing to one. In the current framework, the stability component is given slightly more emphasis than the other two.
+
+This form of fusion corresponds to a weighted geometric mean rather than an arithmetic mean. Methodologically, that is a sensible choice. If any component is very low, the final confidence should also fall noticeably, because a zone that is historically sparse, highly unstable, or inconsistent with its neighbours should not remain highly trusted simply because it scores well on one other dimension. The geometric fusion therefore enforces a stricter notion of reliability than a simple additive average.
+
+\subsection{Interpretation of Confidence}
+
+The resulting confidence value
+\[
+c\_i(\tau) \in (0,1]
+\]
+has a specific operational interpretation in the methodology. It is not a calibrated probability that the prediction is correct. Rather, it is a relative reliability weight indicating how strongly the graph stage should trust the temporal baseline and the associated residual supervision for that node. A high-confidence node provides a more dependable anchor for graph refinement. A low-confidence node remains in the graph, but its influence on the graph learning objective is reduced \cite{park2022confidenceaware,wang2024gnnuncertaintysurvey}.
+
+The confidence mechanism does not suppress uncertain zones entirely, because uncertain regions may still benefit substantially from spatial correction. Instead, it modulates their influence so that the graph model is shaped more strongly by nodes whose baseline predictions appear trustworthy.
+
+\section{Stage Two: Graph-Based Residual Refinement}
+\label{sec:graph-stage}
+
+\subsection{Motivation for Spatial Refinement}
+
+The temporal stage models each zone independently. This is valuable for local specialisation, but it leaves an important weakness unresolved: independent temporal models do not explicitly enforce spatial coherence. In a mobility system, zones interact through travel flows, commuting patterns, and network effects. If one zone experiences a surge while its strongly connected neighbours do not, the discrepancy may indicate either a true local anomaly or an error in the temporal estimate \cite{jiang2022survey,ke2021od}. The graph stage is introduced precisely to handle this kind of structured interaction.
+
+Rather than building a graph model that predicts demand directly from node features alone, the methodology adopts a residual refinement strategy. The baseline temporal predictions are treated as strong priors, and the graph network learns how much these priors should be adjusted in light of spatial context. This makes the graph stage a corrective mechanism rather than a replacement predictor \cite{shao2022d2stgnn}.
+
+\subsection{Node Features}
+
+At each rolling step, the graph is instantiated with one node per valid Taxi Zone. The node feature vector for zone \(z\_i\) at time \(\tau\) is
+\[
+\mathbf{x}^{\text{graph}}\_i(\tau)
+=
+[
+\tilde{x}\_i(\tau),
+c\_i(\tau),
+m\_i^{24h}(\tau),
+m\_i^{168h}(\tau),
+m\_i^{720h}(\tau)
+].
+\]
+If some auxiliary historical features are unavailable, they are replaced safely and transformed using \(\log(1+x)\) before concatenation.
+
+The first element of the node feature vector is the baseline temporal prediction, which also acts as the prior that will later receive residual correction. The second element is the confidence score. The remaining elements summarise historical demand over different temporal ranges. Together, these inputs give the graph network access to the current forecast, the reliability of that forecast, and coarse contextual information about the historical level of the zone \cite{lyu2021bigdata,lim2021survey}.
+
+\subsection{Residual Supervision}
+
+The supervised target for the graph model is not the raw demand count. Instead, it is the residual
+\[
+r\_i^*(\tau) = y\_i(\tau) - \tilde{x}\_i(\tau).
+\]
+If the graph model predicts a residual \(\hat{r}\_i(\tau)\), then the final refined prediction is
+\[
+\hat{x}\_i(\tau) = \tilde{x}\_i(\tau) + \hat{r}\_i(\tau).
+\]
+
+The residual strategy stabilises graph learning because the graph model only needs to explain what the temporal stage failed to capture. It also preserves interpretability: a positive residual means underprediction and a negative residual means overprediction \cite{shao2022d2stgnn}.
+
+\subsection{GraphSAGE Architecture}
+
+The graph refinement network is a two-layer GraphSAGE model with mean aggregation. Let \(\mathbf{h}\_i^{(0)} = \mathbf{x}^{\text{graph}}\_i\) be the initial node feature vector. At each GraphSAGE layer, the node update takes the general form
+\[
+\mathbf{h}\_i^{(\ell+1)}
+=
+\sigma\Big(
+\mathbf{W}^{(\ell)}
+\big[
+\mathbf{h}\_i^{(\ell)} \, ; \,
+\text{AGG}\{\mathbf{h}\_j^{(\ell)} : j \in \mathcal{N}(i)\}
+\big]
+\Big),
+\]
+where \(\text{AGG}\) is mean aggregation, \(\mathbf{W}^{(\ell)}\) is a learnable transformation, and \(\sigma\) is a nonlinear activation. In the implemented design, the activations are followed by dropout and the hidden nonlinearity is GELU.
+
+The first GraphSAGE layer maps the input features into a hidden representation. The second layer further propagates and mixes information across the graph. Finally, a linear output layer projects the hidden state to a scalar residual:
+\[
+\hat{r}\_i(\tau) = \mathbf{w}\_{\text{out}}^\top \mathbf{h}\_i^{(2)} + b\_{\text{out}}.
+\]
+
+The use of mean aggregation is consistent with the overall design goal of smoothing and consistency-aware correction. Because the graph stage is not expected to discover highly complex spatial semantics from scratch, a relatively simple aggregation rule is appropriate and less likely to overfit than more elaborate attention-based alternatives in a limited-data setting \cite{hamilton2017graphsage,jiang2022survey}.
+
+\subsection{Confidence-Aware Loss Weighting}
+
+The graph model is trained using a per-node Smooth \(L\_1\) loss on the residual target:
+\[
+\ell\_i(\tau)
+=
+\text{SmoothL1}\big(\hat{r}\_i(\tau), r\_i^*(\tau)\big).
+\]
+To incorporate reliability information, the loss is weighted by the node confidence:
+\[
+\mathcal{L}\_{\text{graph}}(\tau)
+=
+\frac{1}{|\mathcal{V}\_\tau|}
+\sum\_{i \in \mathcal{V}\_\tau}
+\omega\_i(\tau)\,\ell\_i(\tau),
+\]
+where the weights \(\omega\_i(\tau)\) are derived from \(c\_i(\tau)\) and normalised so that the mean weight remains close to one.
+
+This weighting strategy is a central methodological innovation of the framework. It allows the graph stage to learn more strongly from nodes whose baseline predictions appear reliable and to down-weight the contribution of unstable or poorly supported nodes. Importantly, this does not mean that low-confidence nodes are ignored. They still receive refined predictions through message passing, but their residual targets influence optimisation less strongly \cite{park2022confidenceaware,wang2024gnnuncertaintysurvey}.
+
+\subsection{Why Node-Weighted Rather Than Edge-Weighted?}
+
+Although the OD matrix contains edge magnitudes and confidence can also be used to define pairwise quantities, the current graph stage injects reliability mainly through node-level loss weighting. This means that confidence affects optimisation but not the GraphSAGE message-passing operator directly. The edge structure still determines neighbourhood aggregation, but the messages themselves are not explicitly multiplied by OD flow magnitude or confidence-derived edge weights inside the standard \texttt{SAGEConv} layers.
+
+This design reflects a methodological trade-off. Node-weighted learning is simpler, easier to implement robustly, and still captures a large share of the intended reliability logic. Explicit edge-weighted message passing would be a natural extension, but it would require modifying the graph operator or replacing it with a layer that directly supports weighted propagation. In the present framework, the more conservative choice is to keep message passing standard and inject reliability into the supervision instead \cite{west2025weighted,hu2025uncertaintygnn}.
+
+\subsection{Graph Training per Rolling Step}
+
+At each rolling step, the graph stage is trained using the current hourly graph snapshot containing all valid zones and their baseline predictions. The model is optimised for a fixed number of epochs with Adam and a cosine annealing learning-rate schedule. After training, the residual predictions are produced and added to the baseline forecasts to obtain refined outputs.
+
+Methodologically, this produces a clear, contained graph refinement process: each rolling hour yields one graph, one residual learning problem, and one set of refined predictions. The advantage is that the graph stage is tightly aligned with the current forecasting state. The limitation is that training and evaluation occur on the same hourly batch, which may overstate generalisation \cite{hewamalage2022pitfalls,cerqueira2020evaluating}. This issue is discussed explicitly later because it affects how strongly one should interpret graph-stage performance gains.
+
+\subsection{Handling Missing and Invalid Nodes}
+
+Only nodes with valid baseline predictions and valid labels are used in graph training. If a zone is missing a temporal prediction or lacks a valid target value, it is excluded from the graph snapshot for that step. The adjacency structure is then reindexed to match the filtered node set. This avoids contaminating the graph stage with invalid entries and prevents propagation of undefined values.
+
+Such filtering is methodologically justified because the graph stage is a refinement model, not a data imputation mechanism. Its purpose is to improve valid baseline predictions through spatial consistency, not to invent supervision where none exists. Restricting the graph to valid nodes therefore keeps the learning problem well-posed.
+
+\section{Rolling Forecasting Protocol and Model Management}
+\label{sec:rolling-protocol}
+
+\subsection{Rolling Workflow}
+
+The entire framework is executed under a rolling protocol. Let the first target time be \(\tau\_1\). For each rolling step \(k = 1, 2, \dots, K\), the target hour is
+\[
+\tau\_k = \tau\_1 + (k-1)\Delta,
+\]
+where \(\Delta = 1\) hour. At each step, the system performs the following operations:
+\begin{enumerate}
+	\item determine the valid historical context for each zone,
+	\item train or load the temporal model as required,
+	\item generate Monte Carlo baseline predictions and uncertainty estimates,
+	\item compute prior, stability, and neighbourhood confidence components,
+	\item assemble the graph snapshot with node features and residual targets,
+	\item train the graph refinement model and produce refined predictions,
+	\item compute and save per-hour and cumulative metrics.
+\end{enumerate}
+
+This repeated procedure is intended to approximate operational forecasting, in which predictions are updated continuously as time progresses. It also reveals whether the forecasting quality is stable, improving, or deteriorating over the rolling horizon \cite{hewamalage2022pitfalls,cerqueira2020evaluating}.
+
+\subsection{Persistent Checkpoint Reuse}
+
+In the default operating mode, the temporal stage uses persistent checkpoint reuse. Once a zone model has been trained on the history available up to a given context end, it is saved and reused in later rolling steps. If no checkpoint exists, the model is trained once. If a checkpoint exists, the system loads it and uses it for forecasting without retraining the model from scratch.
+
+Persistent reuse has clear practical benefits. It reduces computation, allows rapid repeated forecasting, and mimics the behaviour of many deployed systems in which models are updated less frequently than predictions are requested. Methodologically, this persistent setup provides a realistic and efficient baseline for rolling forecasting \cite{hewamalage2022pitfalls,cavalcante2024review}.
+
+However, persistent reuse also introduces a risk. If demand patterns drift over time, a fixed checkpoint may become progressively less well matched to the current data. This motivates the optional incremental extension \cite{cavalcante2024review}.
+
+\subsection{Incremental Update Extension}
+
+Beyond the persistent baseline, the framework also supports an incremental training variant. In this mode, when new rolling windows become available, the previously trained zone model can be updated through lightweight additional optimisation rather than being reused unchanged or retrained from scratch. The aim is to preserve most of the learned structure while allowing the model to absorb newly observed data.
+
+Methodologically, this incremental mode occupies an intermediate position between full retraining and static checkpoint reuse. Full retraining is the most adaptive but computationally costly. Pure persistence is computationally cheap but may become stale. Incremental updating attempts to combine the strengths of both: the model retains past knowledge but can respond to drift through targeted adaptation \cite{cavalcante2024review}.
+
+It is important to state the status of this feature accurately. The incremental mechanism is available in the codebase, but it is not the default baseline in the current rolling driver configuration. Therefore, when this thesis discusses the main rolling results, persistent reuse remains the default interpretation unless otherwise stated. The incremental variant should be treated as an implemented extension that strengthens the realism and extensibility of the framework.
+
+\subsection{Why Rolling Evaluation Matters}
+
+Rolling evaluation is not merely an implementation preference. It is a methodological stance about how forecasting systems should be assessed. In static train/test settings, the system is typically trained once and evaluated on a fixed hold-out set. That can be useful for benchmarking, but it suppresses several issues that matter in practice: how performance changes over time, whether uncertainty grows under drift, whether one-step models remain stable across many consecutive operating hours, and what the repeated computational burden of forecasting looks like \cite{hewamalage2022pitfalls,cerqueira2020evaluating}.
+
+By contrast, the rolling protocol used here repeatedly reconstructs the forecasting state as the target time moves forward. This makes the evaluation more realistic and reveals whether graph refinement, uncertainty, and confidence weighting remain useful under changing conditions \cite{hewamalage2022pitfalls}.
+
+\subsection{Temporal Integrity Under Rolling Forecasting}
+
+A forecasting methodology must ensure that only historically available information is used at each step. The current design enforces this in several ways. The temporal input windows end at the hour immediately before the target. The scaler is fitted using observations strictly earlier than the target hour. Historical summary features for graph refinement are computed from windows preceding the target. As a result, the temporal baseline stage is close to a valid leakage-free rolling forecasting procedure \cite{hewamalage2022pitfalls,cerqueira2020evaluating}.
+
+This does not mean that every component of the system is fully free from methodological concerns. As discussed earlier, the graph refinement stage still trains and evaluates on the same hourly batch. Thus, the temporal stage satisfies a stronger notion of temporal integrity than the graph stage currently does. Making that asymmetry explicit is important for honest interpretation of results.
+
+\section{Methodological Discussion}
+\label{sec:methodological-discussion}
+
+\subsection{Why the Method Uses a Two-Stage Rather Than End-to-End Design}
+
+A natural question is why the framework is split into a temporal predictor and a graph refiner instead of using a fully end-to-end spatiotemporal graph neural network from the start. There are several methodological reasons. First, a two-stage design makes the role of each component clearer. The temporal stage is responsible for local next-hour forecasting based on historical demand, while the graph stage is responsible for spatial correction. Second, this separation allows the temporal and graph models to be analysed independently. For example, one can compare the temporal baseline to the graph-refined output directly. Third, the two-stage design simplifies engineering and checkpoint management, especially when the temporal stage is maintained per zone.
+
+There is also a conceptual advantage. Many urban forecasting problems contain both strong local regularity and strong spatial coupling, but not always in equal measure. A unified end-to-end model may entangle these two sources of information in ways that are difficult to interpret. The present method deliberately assigns local regularity to the temporal model and structured cross-zone adjustment to the graph model. This division is simple, interpretable, and consistent with the deployment setting \cite{garcia2023explainability,shao2022d2stgnn}.
+
+\subsection{Current Limitations}
+
+The present methodology is strong in several respects, but it also contains deliberate limitations that should be acknowledged clearly.
+
+First, the graph refinement stage currently trains and evaluates on the same hourly node set. This makes the graph correction locally aligned with the current forecasting state, but it weakens claims about cross-temporal generalisation. A stricter protocol would train graph refinement on earlier snapshots and evaluate it on later snapshots \cite{hewamalage2022pitfalls,cerqueira2020evaluating}.
+
+Second, the OD flow matrix is converted mainly into binary connectivity for message passing. The original edge magnitude information is not fully exploited in the current GraphSAGE operator. As a result, the graph topology captures the existence of mobility coupling, but not its precise strength during message aggregation \cite{west2025weighted,jiang2022survey}.
+
+Third, the temporal stage is per zone, which improves local specialisation but sacrifices direct parameter sharing across zones. In data-poor zones, a shared or hybrid temporal representation may eventually prove beneficial \cite{lim2021survey,zhuang2022sparse}.
+
+Fourth, while the incremental update mechanism is implemented, persistent reuse remains the default baseline. Thus, the current main rolling configuration should still be understood primarily as a persistent checkpoint system with optional extension to incremental adaptation.
+
+Fifth, the historical summary features used in the graph stage are deliberately simple. More expressive exogenous variables such as weather, holidays, events, road disruptions, or land-use descriptors are not yet included. Their absence makes the current method cleaner and easier to interpret, but also leaves performance on the table \cite{lyu2021bigdata,demandfeatures2023}.
+
+\subsection{Summary}
+
+In summary, the proposed methodology constructs a rolling two-stage forecasting system for hourly Taxi Zone demand prediction. The first stage is a per-zone multi-scale temporal predictor that combines LSTM, Transformer, and GRU components across four temporal horizons. The second stage is a GraphSAGE residual refinement model operating on an OD flow graph. Between them lies a confidence mechanism that fuses historical sufficiency, predictive stability, and neighbourhood agreement into a node-level reliability weight. The temporal stage prioritises local modelling fidelity, the graph stage introduces spatial consistency, and the rolling protocol provides deployment-oriented evaluation.
+
+The resulting framework is methodologically coherent because each component serves a distinct purpose and because the information flow between components is explicit. Multi-scale modelling addresses temporal heterogeneity. Monte Carlo Dropout quantifies uncertainty. Confidence weighting links uncertainty to downstream optimisation. Graph refinement corrects independent zone-level forecasts using relational structure. Rolling execution tests whether all of these choices remain useful as time advances.
+
+Although the current design still leaves room for stronger graph validation, explicit edge weighting, and more systematic online adaptation, it already provides a solid and research-oriented methodological foundation. It is not merely a collection of implementation choices. Rather, it is a structured response to the combined challenges of temporal complexity, spatial dependence, uncertainty, and operational realism in urban taxi demand forecasting.
+
 	\chapter{Implementation}
-	\section{System Setup}
-	Describe your implementation details here.
 	
-	\section{Code Example}
-	Example Python code:
-	\begin{lstlisting}[language=Python, caption={Example Python code}]
-		import torch
-		import torch.nn as nn
-		
-		class MyModel(nn.Module):
-		def __init__(self):
-		super().__init__()
-		self.linear = nn.Linear(10, 1)
-		
-		def forward(self, x):
-		return self.linear(x)
-	\end{lstlisting}
+	\section{Overview}
+	
+	This chapter describes the concrete implementation of the proposed two-stage, confidence-weighted forecasting framework. Whereas the previous chapter introduced the methodology at an algorithmic level, this chapter explains how the system is realised in the codebase, how the major modules interact, and how data moves from raw taxi records to temporal predictions, graph-refined outputs, and final evaluation files. The implementation is organised around three principal Python modules. The first is \texttt{demo\_rolling\_GNN.py}, which acts as the top-level rolling driver. It loads data, prepares lookup tables and adjacency structures, controls the rolling loop, computes confidence scores, calls the temporal model manager, invokes the graph refinement stage, and writes the main output files. The second is \texttt{persistent\_multiscale\_confi.py}, which implements the per-zone multi-scale temporal model and its checkpoint manager. The third is \texttt{gnn\_model.py}, which implements the GraphSAGE residual refinement model and the graph-stage training pipeline. This division of responsibilities is visible in the driver script, where the graph pipeline is imported from \texttt{gnn\_model.py}, while the default temporal manager is imported from \texttt{persistent\_multiscale\_confi.py}; the incremental manager is present as an alternative import but is not enabled by default in the current script.
+	
+	The implementation follows a deliberately modular structure. The temporal stage is isolated inside a model-manager class so that training, checkpoint storage, loading, scaling, inference, and uncertainty estimation are all handled through a consistent interface. The graph stage is separated into its own pipeline so that it receives a clean table of predictions, labels, historical features, and confidence values from the rolling driver. The driver script then coordinates the two stages at each target hour. This design makes the system easier to debug and to extend: the temporal model can be modified without rewriting the graph refinement function, and the graph refinement logic can be changed without altering the data loading and rolling orchestration code.
+	
+	A central implementation decision is that the rolling pipeline is treated as the main execution unit. The system is not written as a single train-then-test script. Instead, the driver iterates over target timestamps, generates per-zone predictions, evaluates the temporal baseline, constructs the graph input for that hour, performs graph refinement, and stores both detailed and aggregated metrics. The rolling configuration is controlled by explicit constants in the driver script, including paths for the data, lookup table, edge-weight matrix, checkpoint directory, starting target time, number of rolling steps, excluded zones, whether to retrain each hour, and the number of Monte Carlo Dropout samples.
+	
+	\section{Software Structure and Module Responsibilities}
+	
+	\subsection{Top-Level Rolling Driver}
+	
+	The main entry point of the implementation is \texttt{demo\_rolling\_GNN.py}. This file is responsible for system-level orchestration rather than model definition. Its responsibilities can be divided into five groups: data preparation, graph support construction, confidence computation, rolling prediction, and output generation.
+	
+	The first group concerns data preparation. The function \texttt{prepare\_df()} loads \texttt{data.parquet}, keeps the \texttt{pickup\_datetime} and \texttt{PULocationID} columns, converts timestamps into pandas datetime format, floors them to hourly resolution, filters out excluded zones, and prints basic timestamp diagnostics. In addition, \texttt{\_build\_zone\_hourly\_counts()} constructs a grouped count series indexed by \texttt{PULocationID} and hour, which is later used for historical mean features. This implementation choice ensures that the downstream pipeline receives a consistent hourly representation of the raw trip data.
+	
+	The second group concerns lookup and adjacency construction. The function \texttt{\_load\_zone\_lookup()} reads the taxi-zone lookup table and removes duplicate \texttt{LocationID} entries. The function \texttt{\_build\_zone\_adjacency()} reads the OD flow matrix, normalises possible byte-order marks in row and column labels, maps zone names to \texttt{LocationID} values, and creates an adjacency list by retaining neighbours whose flow weight is greater than zero. This adjacency list is used mainly for the neighbourhood consistency component of the confidence score.
+	
+	The third group concerns confidence computation. The rolling driver computes three reliability components: a prior score based on historical sample richness, a stability score based on Monte Carlo predictive variance, and a neighbourhood consistency score based on agreement with adjacent zones. The prior score is computed from log-transformed zone counts and then rescaled to avoid exact zero confidence. The stability score is computed from variance values in the current rolling step using an exponential decay controlled by the median variance scale. The neighbourhood score compares each prediction with available predictions from graph neighbours and maps the difference into a clipped confidence interval. These components are combined in log space with weights for prior, stability, and neighbourhood terms, and the resulting score is assigned back to the per-hour prediction dataframe.
+	
+	The fourth group concerns rolling execution. The function \texttt{run\_rolling\_with\_gnn()} is the central loop. It iterates over \texttt{ROLLING\_STEPS}, constructs the target timestamp for each step, optionally creates a separate checkpoint directory if hourly retraining is enabled, and otherwise reuses the shared temporal manager. For every zone, it calls the temporal manager to train or load the model if needed, obtains the point prediction and uncertainty estimate, records the true value for the current target hour, and computes historical mean features. After the zone loop finishes, it evaluates the baseline temporal predictions, prepares the GNN input table by renaming \texttt{y\_pred} to \texttt{Prediction} and \texttt{y\_true} to \texttt{True Value}, and calls \texttt{run\_gnn\_pipeline()} with the confidence dictionary and historical feature columns.
+	
+	The fifth group concerns output generation. The rolling driver stores the per-zone temporal predictions in \texttt{predictions\_rolling\_mc.csv}, the temporal baseline hourly metrics in \texttt{hourly\_metrics\_gru.csv}, the graph-refined predictions in \texttt{gnn\_refined\_predictions.csv}, and the graph-stage hourly metrics in \texttt{hourly\_metrics\_gnn.csv}. It also computes overall MAE and RMSE for the temporal baseline and graph-refined outputs and writes them into \texttt{overall\_metrics\_gnn.txt}. The \texttt{main()} function ties these components together by cleaning old checkpoint directories, selecting CUDA or CPU, preparing the dataframe, computing prior scores, loading the lookup table, building adjacency, constructing hourly count series, creating the temporal manager, and launching the rolling loop.
+	
+	\subsection{Temporal Model and Manager Module}
+	
+	The temporal modelling code is implemented in \texttt{persistent\_multiscale\_confi.py}. The file header explicitly identifies the module as a confidence-weighted multi-scale trainer for full runs only, applying MC Dropout confidence logic but without hourly incremental fine-tuning in the default persistent version. This distinction is important because the project also has an incremental variant, but the default driver currently imports the persistent manager.
+	
+	The main model class is \texttt{MultiScaleModel}. It is a four-branch temporal architecture with LSTM encoders for daily and weekly contexts, a Transformer encoder for the monthly context, dropout layers for Monte Carlo sampling, a fusion layer, a GRU backbone, and a final linear output layer. The branch-level components are initialised directly inside the constructor. The model encodes the daily, weekly, and monthly branches through \texttt{\_encode\_temporal\_branches()}, where the daily and weekly sequences are passed through LSTM layers, while the monthly sequence is projected and processed through a Transformer. The fused trend representation is concatenated with the short-term one-hour input to build the GRU input, and the final forward pass returns both the scalar prediction and the internal branch embeddings.
+	
+	The same class also provides two MC Dropout-related interfaces. The function \texttt{mc\_branch\_embeddings()} runs repeated stochastic forward passes and collects branch embeddings under active dropout. The function \texttt{mc\_predict()} returns the mean and standard deviation of repeated stochastic predictions in scaled space. These methods allow the implementation to use the same model both as a point predictor and as an uncertainty estimator.
+	
+	The manager class, \texttt{MultiScaleModelManager}, wraps the model architecture with persistence, data preparation, scaling, training, inference, and orchestration logic. Its configuration is represented by the \texttt{ManagerConfig} dataclass, which specifies the hidden size, full-training epochs, patience, learning rate, sequence length, forecast length, dropout probability, auxiliary coefficient, and Monte Carlo sample counts. The manager constructor creates the checkpoint directory and stores the duration mapping for the four input branches: 1 hour, 24 hours, 168 hours, and 720 hours.
+	
+	Persistence is implemented through separate paths for the model weights, scaler, and metadata. The manager checks whether both model and scaler files exist before deciding whether a checkpoint is available. It saves model parameters with \texttt{torch.save}, serialises the scaler with pickle, and stores the latest training context end in a JSON metadata file. This separation makes the checkpoint explicit and recoverable: the learned network state, scaling transformation, and training horizon are all stored independently.
+	
+	\subsection{Graph Refinement Module}
+	
+	The graph refinement stage is implemented in \texttt{gnn\_model.py}. The file imports \texttt{Data}, \texttt{SAGEConv}, and \texttt{dense\_to\_spar-se} from PyTorch Geometric, indicating that the graph stage is built on sparse graph data structures rather than dense matrix operations. The core graph model is \texttt{MultiScaleGraphSAGE}, a two-layer GraphSAGE network with mean aggregation, GELU activations, dropout, and a final linear layer. Its forward pass reads node features and edge indices, retrieves \texttt{base\_pred}, applies two GraphSAGE layers, predicts a residual, and returns both the residual and the refined prediction obtained by adding the residual to the base prediction.
+	
+	The graph pipeline is implemented by \texttt{run\_gnn\_pipeline()}. It accepts either a dataframe of predictions or a path to a merged CSV file, validates that the input contains \texttt{PULocationID}, \texttt{Prediction}, and \texttt{True Value}, reads the OD edge-weight matrix, converts it into sparse graph connectivity, and constructs mappings between zone names and location identifiers. The pipeline then aligns prediction and label values to graph nodes, filters invalid nodes, remaps the edge index to match the filtered graph, constructs the residual target, concatenates node features, and stores the graph data inside a PyTorch Geometric \texttt{Data} object. Training uses Smooth L1 loss with confidence-based node weighting, Adam optimisation, and cosine annealing. The model finally outputs a dataframe containing \texttt{GRU\_Pred}, \texttt{Refined\_Pred}, \texttt{True\_Value}, and \texttt{Confidence}, and computes MAE and MSE for both the baseline and refined predictions.
+	
+	\section{Data Loading and Preprocessing Implementation}
+	
+	The implementation begins with a compact but important preprocessing step. The raw taxi data are loaded from \texttt{data.parquet}. Only the pickup timestamp and pickup zone identifier are required at this stage. The timestamp is converted to pandas datetime format and then floored to the nearest hour, creating the \texttt{datetime} column used throughout the rest of the system. Excluded zones are filtered immediately so that invalid or unwanted regions do not appear in any later computation. This early filtering is important because the same zone set is used for temporal prediction, confidence scoring, graph refinement, and metric aggregation.
+	
+	The function \texttt{get\_true\_counts()} extracts the ground-truth count for a target hour by filtering the dataframe to the target timestamp and grouping by pickup location. This produces a mapping from \texttt{PULocationID} to observed demand. The rolling loop uses this mapping to assign \texttt{y\_true} for each zone. The implementation also builds \texttt{zone\_hourly\_counts}, a grouped pandas series over zone and hour, so that historical windows can be queried efficiently when constructing mean historical features.
+	
+	Historical mean features are computed in \texttt{\_compute\_history\_means()}. For each target hour and zone, the function creates three lookback windows corresponding to 24 hours, 168 hours, and 720 hours. The sum of observed hourly counts inside each window is divided by the window length, resulting in average demand over the short, weekly, and longer-term context. If a zone has no historical series, the feature dictionary defaults to zeros. These features are later passed into the graph pipeline and concatenated with the temporal prediction and confidence value.
+	
+	The temporal manager also performs its own internal preprocessing at the per-zone level. The function \texttt{\_prepare\_zone\_series()} constructs a dense hourly sequence for a single zone ending at the forecasting context end. It groups records by datetime, creates a full hourly date range, reindexes the grouped series to that range, fills missing hours with zero, and stores the result as floating-point passenger counts. This dense reconstruction is essential because a neural sequence model requires a regular input grid. Without explicitly inserting zero-demand hours, the model would not be able to distinguish inactivity from missing records.
+	
+	Scaling is implemented in \texttt{\_fit\_scaler\_hist()}. The scaler is fitted only on rows whose timestamps are earlier than the target hour, which helps preserve temporal integrity. The implementation also handles edge cases where the available history is empty, non-finite, or constant by fitting artificial two-point ranges. This avoids crashes in sparse zones and ensures that inverse scaling remains defined even when the historical range is degenerate.
+	
+	Training windows are constructed in \texttt{\_build\_training\_windows()}. The function uses the manager configuration to determine the sequence length and forecast horizon, scales the hourly counts, and then slides across the sequence to produce four input tensors: \texttt{1h}, \texttt{1d}, \texttt{1w}, and \texttt{1m}. The one-hour branch receives the most recent step, the daily branch receives the last 24 steps, the weekly branch receives the last 168 steps, and the monthly branch receives the full 720-step window. The target is the next-hour passenger count in scaled space. During inference, \texttt{\_build\_inference\_window()} uses the same duration mapping to build one aligned input dictionary ending at \texttt{context\_end}.
+	
+	\section{Temporal Model Implementation}
+	
+	The implemented temporal model combines recurrent and attention-based components in a single multi-scale architecture. The constructor defines LSTM encoders for the daily and weekly inputs, a linear projection followed by a Transformer for the monthly input, branch-level dropout layers, a linear feature-fusion layer, a GRU backbone, and a final fully connected output layer. This architecture directly implements the methodological choice that different time scales should be represented through specialised branches.
+	
+	During the forward pass, the model first encodes the daily, weekly, and monthly inputs. The daily and weekly branches return the final hidden states of their LSTM encoders. The monthly branch is projected from a scalar sequence into the hidden dimension and then passed through a Transformer; the final time step of the Transformer output is used as the monthly embedding. These three embeddings are concatenated and compressed through \texttt{feature\_fusion}. The fused trend representation is then repeated along the short sequence dimension and concatenated with the one-hour input to form the GRU input.
+	
+	This implementation makes the GRU a final prediction pathway rather than the only temporal encoder. The longer-term dynamics are represented before the GRU stage, and the GRU receives both immediate demand and the fused trend. This separation makes the model relatively interpretable: daily, weekly, and monthly context are encoded explicitly, while the final output head converts the fused information into a scalar next-hour prediction.
+	
+	Dropout is used in two ways. During normal training, it regularises the branch representations and the short-term hidden state. During uncertainty estimation, the model deliberately keeps dropout active through the \texttt{train()} mode inside the MC functions. In \texttt{mc\_predict()}, repeated stochastic forward passes produce a tensor of predictions, from which the mean and standard deviation are computed. In \texttt{mc\_branch\_embeddings()}, the same repeated-sampling idea is applied to hidden embeddings rather than only final predictions.
+	
+	Training is managed by \texttt{train\_once()}. If a checkpoint already exists, the function exits early. Otherwise, it prepares the dense zone series, builds training windows, creates a \texttt{MultiScaleModel}, and trains it with Adam and mean squared error. The loop tracks the best loss and uses a patience counter for early stopping. After training, the model, scaler, and metadata are saved. The implementation therefore avoids repeated full training for zones that already have a checkpoint, which is central to the persistent rolling setup.
+	
+	Inference is split into \texttt{predict()} and \texttt{predict\_with\_uncertainty()}. The plain prediction function loads the checkpoint, reconstructs the context end as one forecast horizon before the target date, prepares the dense series, fits the scaler on historical data before the target, builds the inference window, obtains the MC mean prediction, inverse-transforms it, and returns it as a float. The uncertainty function performs the same setup but additionally returns the original-scale predictive standard deviation and a dictionary of branch variances for the four temporal branches. This is the interface used by the rolling driver to populate \texttt{y\_pred}, \texttt{mc\_std}, and variance values for each zone.
+	
+	The orchestration method \texttt{train\_and\_predict\_if\_needed()} combines persistence and forecasting. It computes the context end, trains the model if no checkpoint exists, loads metadata if a checkpoint does exist, and warns if the checkpoint is older than the current context while incremental updates are disabled. It then returns the prediction for the target date. This makes the default behaviour explicit: the current persistent version reuses existing checkpoints rather than automatically fine-tuning them.
+	
+	\section{Confidence Implementation}
+	
+	The confidence mechanism is implemented mainly in the rolling driver rather than inside the temporal manager or the graph module. This is appropriate because confidence depends on information from multiple sources: global historical counts from the full dataframe, MC variance values from temporal inference, and neighbourhood agreement from the graph adjacency list.
+	
+	The prior score is computed once before rolling begins. It groups the entire prepared dataframe by \texttt{PULocationID}, applies a log transform to the counts, min--max normalises them, and rescales the output into a range bounded away from zero. This produces a zone-level reliability prior: zones with richer historical observations receive stronger prior confidence.
+	
+	The stability score is computed at every rolling step because it depends on the current MC variance. The implementation takes the variance column from the step dataframe, uses the median finite variance as a scale parameter, and applies an exponential decay to map variance into a confidence-like score. Predictions with large variance receive lower stability scores.
+	
+	The neighbourhood score is also computed at every rolling step. The implementation first constructs a prediction map for finite predictions, then iterates over zones. For each zone, it retrieves graph neighbours, collects available neighbour predictions, computes their mean and standard deviation, and compares the zone prediction to the local neighbour mean. The resulting difference is converted into a clipped exponential score. If no neighbours have usable predictions, the function assigns a default score rather than failing.
+	
+	The fusion function clips all three components into a safe interval and combines them in log space using the configured component weights. This corresponds to a weighted geometric mean. The final assignment function computes stability and neighbourhood scores, sets the weights to prior 0.3, stability 0.4, and neighbourhood 0.3, and maps each zone to its combined confidence. The output confidence dictionary is passed directly into \texttt{run\_gnn\_pipeline()} and also stored in the step dataframe.
+	
+	\section{Graph Refinement Implementation}
+	
+	The graph stage starts from a dataframe prepared by the rolling driver. The driver renames the temporal prediction column to \texttt{Prediction} and the observed label column to \texttt{True Value}, keeps \texttt{PULocationID} and the historical features, and passes this dataframe to \texttt{run\_gnn\_pipeline()}. The graph module then checks whether the prediction input is provided as a dataframe or CSV path and verifies that the required columns are present.
+	
+	The OD flow matrix is read from \texttt{edge\_weight\_matrix\_with\_flow.csv}. It is converted into a tensor and then into sparse \texttt{edge\_index} format with \texttt{dense\_to\_sparse}. The module also reads the taxi-zone lookup file, constructs mappings between zone names and location identifiers, and uses those mappings to align dataframe rows with graph node positions.
+	
+	Node weights are built by \texttt{\_build\_node\_weights()}. If a confidence dictionary is provided, the function maps each \texttt{PULocationID} confidence score to the corresponding zone index and clips it into the interval from zero to one. If no confidence dictionary is available, the function falls back to county-level volume weighting. In the main rolling configuration, confidence is provided, so the node weights correspond to confidence values derived from temporal uncertainty, historical richness, and neighbourhood consistency.
+	
+	The graph pipeline creates arrays for node predictions, node labels, and historical features, initially filled with NaNs. It then iterates over the prediction dataframe, maps each \texttt{PULocationID} to its zone name and graph index, and fills the corresponding prediction, label, and historical feature positions. After this mapping, the pipeline filters to nodes where both prediction and label are finite. It also filters and remaps the edge index so that the graph contains only the valid nodes for the current hour.
+	
+	The residual target is computed as \texttt{node\_label - node\_pred}. Node features are formed by concatenating the baseline prediction, node weight, and optional historical feature tensor. The resulting graph data object contains \texttt{x}, \texttt{edge\_index}, \texttt{y}, \texttt{base\_pred}, and \texttt{confidence}. If confidence is available, a confidence-derived \texttt{edge\_weight} field is also constructed as the product of source and target node weights, although the current \texttt{SAGEConv} layers do not explicitly consume this field.
+	
+	Training configuration is defined inside the graph pipeline. The graph model uses dropout 0.1, learning rate 0.01, hidden dimension 256, and 300 epochs. The optimiser is Adam, the scheduler is cosine annealing, and the loss function is Smooth L1 with no reduction so that per-node weighting can be applied. During training, the pipeline computes residual predictions and refined predictions, evaluates the per-node residual loss, chooses confidence as the sample weight when available, normalises the weights by their mean, and optimises the weighted average loss.
+	
+	After training, the graph model is evaluated without gradient tracking. The output dataframe includes the location ID, zone name, GRU baseline prediction, graph-refined prediction, true value, and confidence. The graph module computes MAE and MSE for both the baseline and refined predictions, optionally plots diagnostic figures, writes the per-hour final prediction CSV, and returns both the dataframe and metric dictionary to the rolling driver.
+	
+	\section{Rolling Pipeline Implementation}
+	
+	The rolling pipeline is the practical centre of the implementation. The function \texttt{run\_rolling\_with\_gnn()} receives the prepared dataframe, the temporal model manager, the device, prior scores, adjacency mapping, and hourly count series. It begins by sorting all available zones and initialising containers for baseline records, graph records, baseline metrics, and graph metrics.
+	
+	For each rolling step, the target timestamp is computed by adding the step offset to \texttt{START\_TARGET}. If \texttt{RETRAIN\_EACH\_HOUR} is true, a separate checkpoint directory is created for the current target hour, and a new manager is initialised. If it is false, the existing manager is reused. This branch allows the same codebase to support different experimental regimes: persistent reuse, hourly retraining, or alternative manager replacement such as the incremental version.
+	
+	Inside the zone loop, the implementation first calls \texttt{train\_and\_predict\_if\_needed()} to ensure that a checkpoint exists and then calls \texttt{predict\_with\_uncertainty()} to obtain the temporal point estimate and standard deviation. The variance is computed as the square of the standard deviation. The observed count is obtained from the target-hour ground-truth dictionary, and the historical mean features are attached to the record. Errors are caught on a per-zone basis, and failed zones are recorded with NaNs and an error string. This makes the rolling loop robust to isolated zone failures rather than allowing one failed zone to terminate the whole run.
+	
+	After all zones have been processed for the current target hour, the implementation converts the records into a dataframe, attaches the target hour, computes confidence scores, and appends the dataframe to the baseline record list. It then evaluates baseline MAE and RMSE over rows where both prediction and true value are finite.
+	
+	The graph input table is then prepared by renaming the prediction and label columns into the names expected by \texttt{gnn\_model.py}. The graph pipeline is called with the original dataframe, target date, excluded zones, device, zone count, output path, prediction dataframe, zone confidence dictionary, and disabled plotting flag. The resulting graph dataframe is annotated with the current target hour and stored. The graph metric dictionary is converted into per-hour graph metrics containing baseline MAE/MSE and graph-refined MAE/MSE.
+	
+	After all rolling steps finish, the implementation concatenates baseline and graph records, writes CSV files, computes overall baseline MAE/RMSE and graph MAE/RMSE, and writes a concise text summary. This structure ensures that the system produces both detailed row-level outputs for later analysis and compact aggregate metrics for reporting.
+	
+	\section{Checkpoint and Incremental-Update Handling}
+	
+	Checkpointing is implemented in the temporal manager. For each zone, the model path, scaler path, and metadata path are generated from the checkpoint directory and zone identifier. The manager considers a zone to have a checkpoint only when both model and scaler files exist. This avoids loading a partial checkpoint where the neural model exists but the scaler is missing, or vice versa.
+	
+	The default persistent implementation trains a zone model only when no valid checkpoint exists. If a checkpoint already exists, the model is loaded and used for prediction. If the metadata indicates that the model was trained only up to an older context end, the persistent manager emits a warning that incremental updates are disabled and continues to reuse the existing checkpoint. This behaviour is consistent with the default import in the rolling driver, where the persistent manager is active and the incremental manager import line is commented out.
+	
+	The project documentation notes that an incremental manager is also provided in \texttt{code/persistent\_multiscale\_incre\_confi.py}. In that version, new rolling windows can trigger lightweight \texttt{incremental\_update} operations, with the intended purpose of improving MAE/MSE stability between full training runs. The documented activation method is to replace the persistent import in the rolling script with the incremental manager import. Therefore, the implementation should be described carefully: persistent reuse is the default operating mode of the current driver script, while incremental adaptation is implemented as an alternative version that can be enabled by changing the import.
+	
+	This distinction matters for reproducibility. If the thesis reports results from the current default script, they should be interpreted as persistent-checkpoint rolling results. If results are obtained after switching to \texttt{persistent\_multiscale\_incre\_confi.py}, they should be labelled as incremental-update results. The codebase is structured so that both modes share the same rolling driver and graph-refinement pipeline, but the temporal manager behaviour changes.
+	
+	
+	\section{Persistent and Incremental Multi-Scale Managers}
+	
+	The temporal forecasting component is implemented in two closely related manager variants. The first is the persistent multi-scale manager, implemented in \texttt{persistent\_multiscale\_confi.py}. This version performs full training when no checkpoint exists and then reuses the stored model, scaler, and metadata during subsequent rolling steps. It is therefore designed around checkpoint persistence rather than online adaptation. In the current rolling driver, this persistent manager remains the default import, while the alternative incremental manager import is present but commented out. This means that the default experimental configuration should be interpreted as persistent checkpoint reuse unless the import line is manually changed.
+	
+	The second variant is the incremental multi-scale manager, implemented in \texttt{persistent\_multiscale\_incre\_confi.py}. This version preserves the same overall temporal architecture as the persistent manager, including the four temporal branches, branch-level dropout, multi-scale fusion, GRU-based prediction pathway, and Monte Carlo Dropout uncertainty interface. However, it extends the manager logic by adding lightweight incremental updating after the first full training run. Its purpose is to reduce the instability that can occur when a fixed checkpoint is reused over a long rolling horizon while new observations continue to arrive.
+	
+	Structurally, the incremental version still uses the same \texttt{MultiScaleModel} class design. The model contains LSTM encoders for the 1-day and 1-week branches, a Transformer-based encoder for the 1-month branch, dropout layers for Monte Carlo sampling, a fusion layer for combining longer-term temporal representations, and a GRU pathway for producing the final next-hour prediction. It also retains the Monte Carlo interfaces for repeated stochastic prediction and branch-embedding variance estimation. Therefore, the incremental version should not be understood as a different forecasting architecture. Rather, it is a different training and model-management strategy built around the same multi-scale temporal backbone.
+	
+	The main implementation difference appears in the configuration and orchestration logic. The incremental manager adds several parameters that do not appear in the basic persistent version, including \texttt{epochs\_incremental}, \texttt{lr\_incremental}, \texttt{weight\_decay}, and \texttt{grad\_clip}. These parameters separate full initial training from subsequent lightweight adaptation. Full training remains relatively more expensive and is used when no checkpoint exists. Incremental training, by contrast, is deliberately small: it is intended to update an existing model with newly available rolling-window observations rather than to rebuild the model from the beginning.
+	
+	The core extension is the \texttt{incremental\_update} routine. When the manager detects that the previous training context is older than the new forecasting context, it loads the existing checkpointed model and performs a short additional optimisation step over newly arrived hourly samples. The update interval is defined by the gap between \texttt{prev\_until} and \texttt{new\_until}. Instead of reconstructing the entire historical training process, the function builds incremental windows only for the newly available timestamps in this interval. This design makes the update computationally cheaper than full retraining while still allowing the model parameters to respond to recent observations.
+	
+	The incremental update procedure also refits the scaler using recent historical data before applying the update. In the provided implementation, this recent fitting range is based on the final 30 days before the new context end. The dense hourly series is rebuilt up to \texttt{new\_until}, the scaler is fitted on recent history, the newly available training windows are assembled, and the existing model is fine-tuned using a Smooth L1 loss. The use of Smooth L1 loss in the incremental stage is appropriate because rolling updates may be exposed to local spikes or sparse-zone irregularities, and Smooth L1 is less sensitive to extreme residuals than pure squared error.
+	
+	Another important detail is that the incremental version applies gradient clipping during fine-tuning. This prevents a small number of recent windows from producing excessively large parameter updates. In the context of online or semi-online forecasting, this is a practical safeguard: the purpose of incremental learning is to stabilise the model under gradual drift, not to let a single short update overwrite the previously learned temporal structure. The addition of weight decay also regularises the update and further reduces the risk of overfitting to the newest observations.
+	
+	The incremental version keeps the confidence-related Monte Carlo logic from the persistent confidence-based implementation. During full training and incremental updating, the model can collect branch embeddings under Monte Carlo Dropout and derive confidence-style weights from the variance of those embeddings. In the current code, the auxiliary-head structure is declared in the model, and branch-confidence quantities are computed. However, the auxiliary loss contribution is effectively neutralised in the present implementation because the auxiliary term is multiplied by zero before being added to the main loss. Therefore, the thesis should describe this part carefully: the incremental manager contains the architectural and computational hooks for confidence-weighted auxiliary learning, but the active optimisation objective is currently dominated by the main prediction loss.
+	
+	The orchestration logic makes the behavioural difference between the two managers clear. In the persistent manager, if a checkpoint already exists and its metadata is older than the current context, the system warns that incremental updates are disabled and continues to reuse the existing checkpoint. In the incremental manager, the same situation triggers \texttt{incremental\_update}. After updating, the model, scaler, and metadata are saved again, and the new metadata records the updated context end. This means that, once enabled, the incremental manager maintains a moving checkpoint state that follows the rolling prediction horizon more closely than the static persistent version.
+	
+	From an implementation perspective, this design has an important advantage: the rest of the rolling pipeline does not need to be rewritten. The top-level driver calls the same manager interface, especially \texttt{train\_and\_predict\_if\_needed} and \texttt{predict\_with\_uncertainty}. The difference lies inside the manager implementation. If the persistent manager is imported, checkpoints are reused without fine-tuning. If the incremental manager is imported, the manager updates stale checkpoints before prediction. This makes the incremental mechanism easy to activate and compare experimentally, because it changes the temporal model-management behaviour without changing the graph refinement pipeline.
+	
+	In this thesis, the two variants should therefore be reported separately. The persistent version is the default baseline used by the current rolling script. It is computationally efficient and demonstrates the benefit of checkpoint reuse under rolling evaluation. The incremental version is an implemented extension that improves the realism of the system by allowing newly observed time windows to update the temporal model. It should be treated as a stronger online-adaptive configuration rather than as the default unless the script is explicitly switched to import \texttt{persistent\_multiscale\_incre\_confi.py}. This distinction is important for reproducibility, because the same rolling driver can produce different temporal behaviour depending on which manager is active.
+	
+	\section{Output Artefacts and Evaluation Files}
+	
+	The implementation produces several categories of output artefacts. The first category consists of temporal baseline outputs. \texttt{predictions\_rolling\_mc.csv} contains per-zone rolling records including prediction, true value, uncertainty, variance, error status, historical mean features, confidence, and target hour. \texttt{hourly\_metrics\_gru.csv} contains per-hour baseline MAE, RMSE, and mean true demand. These files are generated in the rolling driver after all rolling steps are complete.
+	
+	The second category consists of graph-refinement outputs. For each target hour, \texttt{run\_gnn\_pipeline()} can write a single-hour CSV named according to the target timestamp. This file includes \texttt{PULocationID}, \texttt{ZoneName}, \texttt{GRU\_Pred}, \texttt{Refined\_Pred}, \texttt{True\_Value}, and \texttt{Confidence}. Across all rolling steps, the driver writes \texttt{gnn\_refined\_predictions.csv}, which aggregates graph-refined rows over time, and \texttt{hourly\_metrics\_gnn.csv}, which stores per-hour MAE and MSE for both baseline and graph-refined predictions.
+	
+	The third category is the summary metric file. The driver computes overall baseline MAE/RMSE from all valid baseline rows and overall graph MAE/RMSE from all valid graph-refined rows, then writes these values into \texttt{overall\_metrics\_gnn.txt}. This gives a compact experiment summary, while the CSV outputs preserve sufficient detail for later plotting, error analysis, and ablation comparisons.
+	
+	The graph module also supports optional visual diagnostics. If plotting is enabled, it produces bar charts comparing MAE and MSE between baseline and graph-refined predictions, and a scatter plot comparing true values with both GRU and GNN predictions. In the rolling driver, plotting is disabled during automated execution to avoid interrupting batch runs.
+	
+	\section{Implementation-Level Limitations}
+	
+	Several implementation-level limitations should be stated openly. First, the default graph stage trains and evaluates on the same hourly graph snapshot. The graph pipeline constructs residual labels from the current target-hour true values, trains the GraphSAGE model for that hour, and then evaluates refined predictions on the same node set. This is useful for measuring the ability of the graph module to fit residual structure in the current graph snapshot, but it is not a strict temporally separated graph-generalisation protocol. The implementation itself makes this visible because each call to \texttt{run\_gnn\_pipeline()} performs graph construction, training, evaluation, metric computation, and output generation within one target-hour call.
+	
+	Second, although the graph pipeline constructs a confidence-derived \texttt{edge\_weight} field when \texttt{zone\_confidence} is available, the defined \texttt{MultiScaleGraphSAGE} class uses standard \texttt{SAGEConv} calls that only consume node features and \texttt{edge\_index}. Thus, confidence affects graph training through node-level loss weighting, but the current message-passing operator does not explicitly use confidence or OD magnitude as an edge weight.
+	
+	Third, the per-zone temporal implementation increases the number of model checkpoints. Each zone can have its own model, scaler, and metadata file. This supports local specialisation but creates storage and management overhead. The checkpoint manager mitigates this through simple file naming and automatic loading, but larger deployments would require more systematic experiment tracking.
+	
+	Fourth, the default persistent manager does not update an existing model when the rolling context advances. It warns that incremental updates are disabled and continues to use the previous checkpoint. This is not a hidden bug but an explicit design of the persistent version. The incremental variant is available separately and should be evaluated as a distinct configuration.
+	
+	\section{Summary}
+	
+	In implementation terms, the project is a modular rolling forecasting system. The driver script prepares data, builds adjacency and confidence scores, controls rolling execution, calls the temporal manager, calls the graph pipeline, and writes outputs. The temporal module implements a checkpointed multi-scale per-zone predictor with LSTM, Transformer, GRU, dropout, scaling, training, inference, and Monte Carlo uncertainty estimation. The graph module implements GraphSAGE residual refinement over an OD-derived graph, using temporal predictions, confidence weights, and historical features as node inputs.
+	
+	The most important implementation strength is that the system is not a single isolated model script. It is a complete experimental pipeline with explicit data preparation, temporal prediction, uncertainty estimation, confidence fusion, graph refinement, rolling evaluation, and reproducible outputs. At the same time, the codebase clearly exposes the boundaries of the current implementation: persistent reuse is the default, incremental adaptation exists as an alternative import, graph refinement currently trains and evaluates on the same hourly node set, and edge weights are prepared but not yet explicitly used inside GraphSAGE message passing. These implementation details are important because they determine how the experimental results should be interpreted in the following chapter.
 	
 	\chapter{Experiments}
 	\section{Experimental Setup}
