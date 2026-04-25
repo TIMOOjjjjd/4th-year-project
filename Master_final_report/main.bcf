@@ -2374,13 +2374,13 @@
     <bcf:datasource type="file" datatype="bibtex" glob="false">reference.bib</bcf:datasource>
   </bcf:bibdata>
   <bcf:section number="0">
-    <bcf:citekey order="1" intorder="1">xue\_2020\_spatialtemporal</bcf:citekey>
-    <bcf:citekey order="2" intorder="1">qian\_2015\_spatial</bcf:citekey>
-    <bcf:citekey order="3" intorder="1">schaller\_2005\_a</bcf:citekey>
+    <bcf:citekey order="1" intorder="1">xue_2020_spatialtemporal</bcf:citekey>
+    <bcf:citekey order="2" intorder="1">qian_2015_spatial</bcf:citekey>
+    <bcf:citekey order="3" intorder="1">schaller_2005_a</bcf:citekey>
     <bcf:citekey order="4" intorder="1">8691703</bcf:citekey>
     <bcf:citekey order="5" intorder="1">zhuang2022sparse</bcf:citekey>
     <bcf:citekey order="6" intorder="1">wu2019graph</bcf:citekey>
-    <bcf:citekey order="7" intorder="1">xue\_2020\_spatialtemporal</bcf:citekey>
+    <bcf:citekey order="7" intorder="1">xue_2020_spatialtemporal</bcf:citekey>
     <bcf:citekey order="8" intorder="1">li2024predictability</bcf:citekey>
     <bcf:citekey order="8" intorder="2">ye2021online</bcf:citekey>
     <bcf:citekey order="9" intorder="1">kontou2020empty</bcf:citekey>
@@ -2404,11 +2404,11 @@
     <bcf:citekey order="22" intorder="2">su2025transformer</bcf:citekey>
     <bcf:citekey order="23" intorder="1">gal2016dropout</bcf:citekey>
     <bcf:citekey order="24" intorder="1">hamilton2017graphsage</bcf:citekey>
-    <bcf:citekey order="25" intorder="1">xue\_2020\_spatialtemporal</bcf:citekey>
+    <bcf:citekey order="25" intorder="1">xue_2020_spatialtemporal</bcf:citekey>
     <bcf:citekey order="25" intorder="2">ke2021od</bcf:citekey>
     <bcf:citekey order="26" intorder="1">liu2022survey</bcf:citekey>
     <bcf:citekey order="26" intorder="2">khalesian2024area</bcf:citekey>
-    <bcf:citekey order="27" intorder="1">qian\_2015\_spatial</bcf:citekey>
+    <bcf:citekey order="27" intorder="1">qian_2015_spatial</bcf:citekey>
     <bcf:citekey order="27" intorder="2">tang2019spatiotemporal</bcf:citekey>
     <bcf:citekey order="28" intorder="1">tang2019spatiotemporal</bcf:citekey>
     <bcf:citekey order="29" intorder="1">jiang2022survey</bcf:citekey>
