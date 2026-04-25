@@ -9,8 +9,21 @@ import pandas as pd
 import torch
 
 from gnn_model import run_gnn_pipeline
-# from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager
-from persistent_multiscale_confi import MultiScaleModelManager, ManagerConfig
+
+MODEL_BACKEND = "lstm"  # "lstm", "gru", "transformer", or "multiscale"
+
+if MODEL_BACKEND == "lstm":
+    from persistent_lstm import ManagerConfig, PureLSTMModelManager as MultiScaleModelManager
+elif MODEL_BACKEND == "gru":
+    from persistent_gru import ManagerConfig, PureGRUModelManager as MultiScaleModelManager
+elif MODEL_BACKEND == "transformer":
+    from persistent_transformer import ManagerConfig, PureTransformerModelManager as MultiScaleModelManager
+elif MODEL_BACKEND == "multiscale":
+    from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager
+else:
+    raise ValueError(f"Unsupported MODEL_BACKEND: {MODEL_BACKEND}")
+
+
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 # # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
@@ -31,13 +44,14 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 DATA_PATH = "data.parquet"
 LOOKUP_PATH = "taxi-zone-lookup.csv"
 EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
-CHECKPOINT_DIR = "checkpoints_multiscale"
+CHECKPOINT_DIR = f"checkpoints_{MODEL_BACKEND}"
 
 START_TARGET = pd.Timestamp("2021-03-05 00:00")
 ROLLING_STEPS = 24
 # EXCLUDED_ZONES = [1,2,3,4,5,6,100]
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 RETRAIN_EACH_HOUR = False
+CLEAN_CHECKPOINTS_ON_START = False
 MC_DROPOUT_SAMPLES = 10
 # =====================================================
 
@@ -49,9 +63,10 @@ HISTORY_WINDOWS = {
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
 
 
-def _cleanup_old_checkpoints(root: Path) -> None:
+def _cleanup_old_checkpoints(root: Path, checkpoint_dir: str) -> None:
+    target_name = Path(checkpoint_dir).name
     for item in root.iterdir():
-        if item.is_dir() and item.name.startswith("checkpoints_"):
+        if item.is_dir() and item.name == target_name:
             try:
                 shutil.rmtree(item)
                 print(f"[debug] deleted old checkpoint directory: {item}")
@@ -337,7 +352,9 @@ def run_rolling_with_gnn(
         gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
         gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
 
-        gnn_output_path = f"final_predictions_multiscale_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
+        gnn_output_path = (
+            f"final_predictions_{MODEL_BACKEND}_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
+        )
         gnn_output_df, gnn_metric = run_gnn_pipeline(
             df_temp=df,
             target_date=target_ts,
@@ -368,11 +385,11 @@ def run_rolling_with_gnn(
     baseline_metrics_df = pd.DataFrame(baseline_metrics)
     gnn_metrics_df = pd.DataFrame(gnn_metrics)
 
-    baseline_df.to_csv("predictions_rolling_mc.csv", index=False)
-    baseline_metrics_df.to_csv("hourly_metrics_gru.csv", index=False)
+    baseline_df.to_csv(f"predictions_rolling_{MODEL_BACKEND}.csv", index=False)
+    baseline_metrics_df.to_csv(f"hourly_metrics_{MODEL_BACKEND}.csv", index=False)
     if not gnn_df.empty:
-        gnn_df.to_csv("gnn_refined_predictions.csv", index=False)
-    gnn_metrics_df.to_csv("hourly_metrics_gnn.csv", index=False)
+        gnn_df.to_csv(f"gnn_refined_predictions_{MODEL_BACKEND}.csv", index=False)
+    gnn_metrics_df.to_csv(f"hourly_metrics_gnn_{MODEL_BACKEND}.csv", index=False)
 
     valid_baseline = baseline_df.dropna(subset=["y_pred", "y_true"])
     if not valid_baseline.empty:
@@ -394,18 +411,19 @@ def run_rolling_with_gnn(
         overall_mae_gnn = float("nan")
         overall_rmse_gnn = float("nan")
 
-    with open("overall_metrics_gnn.txt", "w", encoding="utf-8") as fh:
+    with open(f"overall_metrics_{MODEL_BACKEND}_gnn.txt", "w", encoding="utf-8") as fh:
         fh.write(f"Baseline MAE: {overall_mae}\n")
         fh.write(f"Baseline RMSE: {overall_rmse}\n")
         fh.write(f"GNN MAE: {overall_mae_gnn}\n")
         fh.write(f"GNN RMSE: {overall_rmse_gnn}\n")
 
-    print(f"\n🎯 Baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
+    print(f"\n🎯 {MODEL_BACKEND.upper()} baseline MAE={overall_mae:.4f}, RMSE={overall_rmse:.4f}")
     print(f"🎯 GNN MAE={overall_mae_gnn:.4f}, RMSE={overall_rmse_gnn:.4f}")
 
 
 def main() -> None:
-    _cleanup_old_checkpoints(Path("."))
+    if CLEAN_CHECKPOINTS_ON_START:
+        _cleanup_old_checkpoints(Path("."), CHECKPOINT_DIR)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("CUDA available:", torch.cuda.is_available())

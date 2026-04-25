@@ -1,11 +1,4 @@
-"""Persistent pure-LSTM baseline compatible with demo_rolling_GNN.py.
-
-The manager intentionally mirrors the public rolling-model interface so the
-rolling GNN script can switch between the multiscale model and this LSTM
-baseline with minimal call-site changes. Unlike the multiscale manager, this
-LSTM baseline trains each zone once and reuses the checkpoint for later rolling
-hours.
-"""
+"""Persistent pure-GRU baseline with train-once/reuse behavior."""
 
 from __future__ import annotations
 
@@ -43,8 +36,8 @@ class ManagerConfig:
     min_delta: float = 1e-6
 
 
-class PureLSTM(nn.Module):
-    """Single-branch LSTM forecaster for hourly taxi demand."""
+class PureGRU(nn.Module):
+    """Single-branch GRU forecaster for hourly taxi demand."""
 
     def __init__(
         self,
@@ -54,7 +47,7 @@ class PureLSTM(nn.Module):
         forecast_length: int,
     ) -> None:
         super().__init__()
-        self.lstm = nn.LSTM(
+        self.gru = nn.GRU(
             input_size=1,
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -64,27 +57,27 @@ class PureLSTM(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.head = nn.Linear(hidden_size, forecast_length)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, (hidden, _) = self.lstm(x)
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        _, hidden = self.gru(values)
         last_hidden = self.dropout(hidden[-1])
         return self.head(last_hidden)
 
-    def mc_predict(self, x: torch.Tensor, samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def mc_predict(self, values: torch.Tensor, samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
         self.train()
-        preds = []
+        predictions = []
         with torch.no_grad():
             for _ in range(max(1, int(samples))):
-                preds.append(self.forward(x).unsqueeze(0))
-        pred_stack = torch.cat(preds, dim=0)
-        return pred_stack.mean(dim=0), pred_stack.std(dim=0, unbiased=False)
+                predictions.append(self.forward(values).unsqueeze(0))
+        prediction_stack = torch.cat(predictions, dim=0)
+        return prediction_stack.mean(dim=0), prediction_stack.std(dim=0, unbiased=False)
 
 
-class PureLSTMModelManager:
-    """Per-zone persistent LSTM manager using train-once/reuse behavior."""
+class PureGRUModelManager:
+    """Per-zone persistent GRU manager using train-once/reuse behavior."""
 
     def __init__(
         self,
-        checkpoint_dir: str = "checkpoints_lstm",
+        checkpoint_dir: str = "checkpoints_gru",
         cfg: Optional[ManagerConfig] = None,
         hidden_size: Optional[int] = None,
         device: Optional[torch.device] = None,
@@ -103,13 +96,13 @@ class PureLSTMModelManager:
         return pd.Timedelta(hours=self.cfg.forecast_length)
 
     def _model_path(self, zone_id: int) -> Path:
-        return self.checkpoint_dir / f"lstm_zone_{int(zone_id)}.pt"
+        return self.checkpoint_dir / f"gru_zone_{int(zone_id)}.pt"
 
     def _scaler_path(self, zone_id: int) -> Path:
-        return self.checkpoint_dir / f"lstm_scaler_zone_{int(zone_id)}.pkl"
+        return self.checkpoint_dir / f"gru_scaler_zone_{int(zone_id)}.pkl"
 
     def _meta_path(self, zone_id: int) -> Path:
-        return self.checkpoint_dir / f"lstm_meta_zone_{int(zone_id)}.json"
+        return self.checkpoint_dir / f"gru_meta_zone_{int(zone_id)}.json"
 
     def has_checkpoint(self, zone_id: int) -> bool:
         return (
@@ -118,8 +111,8 @@ class PureLSTMModelManager:
             and self._meta_path(zone_id).exists()
         )
 
-    def _new_model(self) -> PureLSTM:
-        return PureLSTM(
+    def _new_model(self) -> PureGRU:
+        return PureGRU(
             hidden_size=self.cfg.hidden_size,
             num_layers=self.cfg.num_layers,
             dropout=self.cfg.p_drop,
@@ -128,31 +121,22 @@ class PureLSTMModelManager:
 
     def _save(self, zone_id: int, model: nn.Module, scaler: MinMaxScaler) -> None:
         torch.save(model.state_dict(), self._model_path(zone_id))
-        with open(self._scaler_path(zone_id), "wb") as fh:
-            pickle.dump(scaler, fh)
+        with open(self._scaler_path(zone_id), "wb") as file_handle:
+            pickle.dump(scaler, file_handle)
 
-    def _load(self, zone_id: int) -> Tuple[PureLSTM, MinMaxScaler]:
+    def _load(self, zone_id: int) -> Tuple[PureGRU, MinMaxScaler]:
         model = self._new_model()
         state = torch.load(self._model_path(zone_id), map_location=self.device)
         model.load_state_dict(state)
         model.eval()
-        with open(self._scaler_path(zone_id), "rb") as fh:
-            scaler = pickle.load(fh)
+        with open(self._scaler_path(zone_id), "rb") as file_handle:
+            scaler = pickle.load(file_handle)
         return model, scaler
 
     def _save_meta(self, zone_id: int, context_end: pd.Timestamp) -> None:
         meta = {"last_trained_context_end": str(context_end)}
-        with open(self._meta_path(zone_id), "w", encoding="utf-8") as fh:
-            json.dump(meta, fh)
-
-    def _load_meta(self, zone_id: int) -> Optional[pd.Timestamp]:
-        path = self._meta_path(zone_id)
-        if not path.exists():
-            return None
-        with open(path, "r", encoding="utf-8") as fh:
-            meta = json.load(fh)
-        ts = meta.get("last_trained_context_end") or meta.get("last_trained_until")
-        return pd.Timestamp(ts) if ts is not None else None
+        with open(self._meta_path(zone_id), "w", encoding="utf-8") as file_handle:
+            json.dump(meta, file_handle)
 
     @staticmethod
     def _ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
@@ -200,10 +184,14 @@ class PureLSTMModelManager:
             scaler.fit(pd.DataFrame({"passenger_count": [0.0, 1.0]}))
             return scaler
 
-        vmin = float(values["passenger_count"].min())
-        vmax = float(values["passenger_count"].max())
-        if not np.isfinite(vmin) or not np.isfinite(vmax) or np.isclose(vmin, vmax):
-            base = 0.0 if not np.isfinite(vmin) else vmin
+        min_value = float(values["passenger_count"].min())
+        max_value = float(values["passenger_count"].max())
+        if (
+            not np.isfinite(min_value)
+            or not np.isfinite(max_value)
+            or np.isclose(min_value, max_value)
+        ):
+            base = 0.0 if not np.isfinite(min_value) else min_value
             scaler.fit(pd.DataFrame({"passenger_count": [base, base + 1.0]}))
             return scaler
 
@@ -215,25 +203,25 @@ class PureLSTMModelManager:
         hourly: pd.DataFrame,
         scaler: MinMaxScaler,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        seq_len = self.cfg.sequence_length
-        forecast_len = self.cfg.forecast_length
+        sequence_length = self.cfg.sequence_length
+        forecast_length = self.cfg.forecast_length
         hourly = hourly.copy()
         hourly["passenger_count_scaled"] = scaler.transform(hourly[["passenger_count"]])
         series = hourly["passenger_count_scaled"]
 
-        x_values, y_values = [], []
-        for start_idx in range(len(hourly) + 1 - seq_len - forecast_len):
-            target_start = start_idx + seq_len
-            target_end = target_start + forecast_len
-            x_values.append(series.iloc[start_idx:target_start].values)
-            y_values.append(series.iloc[target_start:target_end].values)
+        input_values, target_values = [], []
+        for start_idx in range(len(hourly) + 1 - sequence_length - forecast_length):
+            target_start = start_idx + sequence_length
+            target_end = target_start + forecast_length
+            input_values.append(series.iloc[start_idx:target_start].values)
+            target_values.append(series.iloc[target_start:target_end].values)
 
-        if not x_values:
-            raise ValueError("Insufficient history to build LSTM training windows.")
+        if not input_values:
+            raise ValueError("Insufficient history to build GRU training windows.")
 
-        X = np.asarray(x_values, dtype=np.float32)[..., None]
-        y = np.asarray(y_values, dtype=np.float32)
-        return X, y
+        input_array = np.asarray(input_values, dtype=np.float32)[..., None]
+        target_array = np.asarray(target_values, dtype=np.float32)
+        return input_array, target_array
 
     def _build_inference_window(
         self,
@@ -241,7 +229,7 @@ class PureLSTMModelManager:
         scaler: MinMaxScaler,
         context_end: pd.Timestamp,
     ) -> torch.Tensor:
-        seq_len = self.cfg.sequence_length
+        sequence_length = self.cfg.sequence_length
         hourly = hourly.copy()
         hourly["passenger_count_scaled"] = scaler.transform(hourly[["passenger_count"]])
         idx_map = {ts: idx for idx, ts in enumerate(hourly["datetime"])}
@@ -249,9 +237,9 @@ class PureLSTMModelManager:
             raise ValueError("context_end missing from hourly series.")
 
         end_idx = idx_map[context_end]
-        start_idx = end_idx - seq_len + 1
+        start_idx = end_idx - sequence_length + 1
         if start_idx < 0:
-            raise ValueError("Not enough history to assemble LSTM inference window.")
+            raise ValueError("Not enough history to assemble GRU inference window.")
 
         values = hourly["passenger_count_scaled"].iloc[start_idx : end_idx + 1].values
         return torch.tensor(values, dtype=torch.float32, device=self.device).view(1, -1, 1)
@@ -259,14 +247,10 @@ class PureLSTMModelManager:
     def _train_arrays(
         self,
         model: nn.Module,
-        X: np.ndarray,
-        y: np.ndarray,
-        epochs: int,
-        lr: float,
-        criterion: nn.Module,
-        use_patience: bool,
+        input_array: np.ndarray,
+        target_array: np.ndarray,
     ) -> None:
-        dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+        dataset = TensorDataset(torch.from_numpy(input_array), torch.from_numpy(target_array))
         loader = DataLoader(
             dataset,
             batch_size=min(self.cfg.batch_size, max(1, len(dataset))),
@@ -275,32 +259,30 @@ class PureLSTMModelManager:
         )
         optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=lr,
+            lr=self.cfg.lr_full,
             weight_decay=self.cfg.weight_decay,
         )
+        criterion = nn.MSELoss()
         best_loss = float("inf")
         best_state = None
         patience_ctr = 0
 
-        for _ in range(max(1, int(epochs))):
+        for _ in range(max(1, int(self.cfg.epochs_full))):
             model.train()
             total_loss = 0.0
             sample_count = 0
-            for xb, yb in loader:
-                xb = xb.to(self.device)
-                yb = yb.to(self.device)
+            for input_batch, target_batch in loader:
+                input_batch = input_batch.to(self.device)
+                target_batch = target_batch.to(self.device)
                 optimizer.zero_grad()
-                loss = criterion(model(xb), yb)
+                loss = criterion(model(input_batch), target_batch)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
                 optimizer.step()
-                total_loss += float(loss.item()) * xb.size(0)
-                sample_count += xb.size(0)
+                total_loss += float(loss.item()) * input_batch.size(0)
+                sample_count += input_batch.size(0)
 
             epoch_loss = total_loss / max(1, sample_count)
-            if not use_patience:
-                continue
-
             if epoch_loss < best_loss - self.cfg.min_delta:
                 best_loss = epoch_loss
                 best_state = {
@@ -336,34 +318,26 @@ class PureLSTMModelManager:
             hourly,
             fit_until_exclusive=context_end + pd.Timedelta(hours=1),
         )
-        X, y = self._build_training_arrays(hourly, scaler)
+        input_array, target_array = self._build_training_arrays(hourly, scaler)
         model = self._new_model()
-        self._train_arrays(
-            model=model,
-            X=X,
-            y=y,
-            epochs=self.cfg.epochs_full,
-            lr=self.cfg.lr_full,
-            criterion=nn.MSELoss(),
-            use_patience=True,
-        )
+        self._train_arrays(model, input_array, target_array)
         self._save(zone_id, model, scaler)
         self._save_meta(zone_id, context_end)
 
     def predict(self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp) -> float:
         if not self.has_checkpoint(zone_id):
-            raise FileNotFoundError(f"Zone {zone_id} has no LSTM checkpoint; train first.")
+            raise FileNotFoundError(f"Zone {zone_id} has no GRU checkpoint.")
 
         model, scaler = self._load(zone_id)
         context_end = target_date - self._forecast_delta
         hourly = self._prepare_zone_series(df, zone_id, context_end)
-        X_last = self._build_inference_window(hourly, scaler, context_end)
+        input_last = self._build_inference_window(hourly, scaler, context_end)
 
         model.eval()
         with torch.no_grad():
-            pred_scaled = model(X_last).cpu().numpy()
-        pred = self._inverse_values(pred_scaled, scaler)[0, 0]
-        return float(max(0.0, pred))
+            prediction_scaled = model(input_last).cpu().numpy()
+        prediction = self._inverse_values(prediction_scaled, scaler)[0, 0]
+        return float(max(0.0, prediction))
 
     def predict_with_uncertainty(
         self,
@@ -372,19 +346,19 @@ class PureLSTMModelManager:
         target_date: pd.Timestamp,
     ) -> Tuple[float, float, Dict[str, float]]:
         if not self.has_checkpoint(zone_id):
-            raise FileNotFoundError(f"Zone {zone_id} has no LSTM checkpoint; train first.")
+            raise FileNotFoundError(f"Zone {zone_id} has no GRU checkpoint.")
 
         model, scaler = self._load(zone_id)
         context_end = target_date - self._forecast_delta
         hourly = self._prepare_zone_series(df, zone_id, context_end)
-        X_last = self._build_inference_window(hourly, scaler, context_end)
+        input_last = self._build_inference_window(hourly, scaler, context_end)
 
-        mean_scaled, std_scaled = model.mc_predict(X_last, self.cfg.M_mc_test)
-        mean_np = mean_scaled.cpu().numpy()
-        std_np = std_scaled.cpu().numpy()
-        point = self._inverse_values(mean_np, scaler)[0, 0]
-        std_orig = self._inverse_std_minmax(std_np, scaler)[0, 0]
-        diagnostics = {"lstm_mc_variance": float(std_orig**2)}
+        mean_scaled, std_scaled = model.mc_predict(input_last, self.cfg.M_mc_test)
+        mean_values = mean_scaled.cpu().numpy()
+        std_values = std_scaled.cpu().numpy()
+        point = self._inverse_values(mean_values, scaler)[0, 0]
+        std_orig = self._inverse_std_minmax(std_values, scaler)[0, 0]
+        diagnostics = {"gru_mc_variance": float(std_orig**2)}
         return float(max(0.0, point)), float(max(0.0, std_orig)), diagnostics
 
     def train_and_predict_if_needed(
@@ -397,10 +371,10 @@ class PureLSTMModelManager:
         context_end = target_date - self._forecast_delta
         if not self.has_checkpoint(zone_id):
             if not auto_train:
-                raise FileNotFoundError(f"No LSTM checkpoint for zone {zone_id}.")
+                raise FileNotFoundError(f"No GRU checkpoint for zone {zone_id}.")
             self.train_once(df, zone_id, context_end)
 
         return self.predict(df, zone_id, target_date)
 
 
-MultiScaleModelManager = PureLSTMModelManager
+MultiScaleModelManager = PureGRUModelManager
