@@ -287,16 +287,33 @@ class MultiScaleModelManager:
             raise ValueError("context_end missing from hourly series.")
 
         end_idx = idx_map[context_end]
-        start_idx = end_idx - L
+        window_end = end_idx + 1
+        start_idx = window_end - L
         if start_idx < 0:
             raise ValueError("Not enough history to assemble inference window.")
 
         series = hourly["passenger_count_scaled"]
         X = {
-            "1h": torch.tensor(series.iloc[end_idx - self.durations["1h"] : end_idx].values, dtype=torch.float32, device=device).view(1, -1, 1),
-            "1d": torch.tensor(series.iloc[end_idx - self.durations["1d"] : end_idx].values, dtype=torch.float32, device=device).view(1, -1, 1),
-            "1w": torch.tensor(series.iloc[end_idx - self.durations["1w"] : end_idx].values, dtype=torch.float32, device=device).view(1, -1, 1),
-            "1m": torch.tensor(series.iloc[start_idx:end_idx].values, dtype=torch.float32, device=device).view(1, -1, 1),
+            "1h": torch.tensor(
+                series.iloc[window_end - self.durations["1h"] : window_end].values,
+                dtype=torch.float32,
+                device=device,
+            ).view(1, -1, 1),
+            "1d": torch.tensor(
+                series.iloc[window_end - self.durations["1d"] : window_end].values,
+                dtype=torch.float32,
+                device=device,
+            ).view(1, -1, 1),
+            "1w": torch.tensor(
+                series.iloc[window_end - self.durations["1w"] : window_end].values,
+                dtype=torch.float32,
+                device=device,
+            ).view(1, -1, 1),
+            "1m": torch.tensor(
+                series.iloc[start_idx:window_end].values,
+                dtype=torch.float32,
+                device=device,
+            ).view(1, -1, 1),
         }
         return X
 
