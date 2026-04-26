@@ -184,7 +184,16 @@ At the same time, the current project setting presents several important methodo
 
 The present project is motivated by precisely these difficulties. It addresses hourly taxi demand prediction for New York City Taxi Zones through a two-stage, confidence-weighted, multi-scale forecasting framework. According to the project blueprint, the system is organised around three linked ideas: first, each zone is predicted with a persistent multi-branch temporal model that captures information at hourly, daily, weekly, and monthly scales; second, predictive uncertainty is estimated through Monte Carlo Dropout and fused with other reliability indicators to form a confidence score \cite{gal2016dropout}; third, the initial predictions are refined on a graph built from origin-destination flow relationships using a GraphSAGE residual learning module \cite{hamilton2017graphsage}. The overall pipeline is executed in a rolling fashion, producing hour-by-hour forecasts, metrics, and output files that simulate a realistic operational deployment setting.
 
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/1.1.png}
+	\caption{Raw taxi trip records are first aggregated into hourly passenger counts for each taxi zone, forming zone-level historical demand series. Based on these time series, the forecasting task is to predict the passenger demand in the next hour for every taxi zone.}
+	\label{fig:1.1}
+\end{figure}
+
 The choice of a multi-scale temporal backbone is central to the rationale of this work. Urban taxi demand is inherently hierarchical in time. Short-term behaviour captures immediate fluctuations and local momentum. Daily periodicity reflects repeated within-day routines such as morning commute and evening return flows. Weekly periodicity encodes the distinction between weekdays and weekends, and longer temporal windows can provide a broader view of persistent demand level and slow trend evolution. A model built on a single temporal granularity often struggles to preserve all of these signals simultaneously. In this project, the temporal stage therefore uses four branches corresponding to 1-hour, 1-day, 1-week, and 1-month contexts. The implementation combines LSTM encoders for daily and weekly windows, a Transformer-based encoder for the longer monthly window, and a GRU-driven output pathway for the short-term branch, with the fused trend representation used to support final next-step prediction. This design reflects an explicit modelling assumption: different temporal horizons contribute complementary predictive information, and their joint representation is more suitable for robust zone-level forecasting than any single-scale view alone \cite{liao2022taxi,su2025transformer}.
+
+
 
 Equally important is the decision to adopt a persistent per-zone training strategy rather than a monolithic city-wide temporal model. In the current implementation, each zone maintains its own checkpointed forecasting model, allowing training to occur once and then be reused during subsequent rolling steps. This persistent formulation has two practical advantages. First, it respects local heterogeneity by letting each zone learn its own temporal dynamics without forcing all regions into a single parameter space. Second, it reduces unnecessary retraining cost during rolling evaluation, which is useful when the system is intended to mimic hourly forecasting updates. At the same time, the project explicitly recognises that persistent checkpoint reuse is not the only available operating mode. The repository also provides an incremental training variant in which newly arrived time windows trigger lightweight model updates. However, in the present rolling script configuration, the persistent manager remains the default setting, so online adaptation is supported by the codebase but not enabled by default.
 
@@ -199,6 +208,13 @@ The rolling evaluation protocol is another defining feature of this study. Inste
 \section{Research Aim and Questions}
 
 Against this background, the aim of this thesis is to investigate whether a two-stage architecture can improve hourly urban taxi demand forecasting by combining local multi-scale temporal modelling with confidence-aware graph refinement.
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/1.2.png}
+	\caption{Framework for taxi-zone passenger demand prediction using multi-scale temporal forecasting and GraphSAGE-based residual refinement.}
+	\label{fig:1.2}
+\end{figure}
 
 More specifically, this thesis addresses the following research questions:
 
@@ -244,7 +260,17 @@ This chapter therefore reviews the literature in six connected parts. First, it 
 
 \section{Traditional Urban Demand Forecasting Methods}
 
-The earliest literature on transportation demand forecasting was dominated by statistical and econometric models. Classical methods included autoregressive integrated moving average models, seasonal ARIMA variants, exponential smoothing, Poisson and negative binomial regression, and state-space formulations \cite{petropoulos2020forecasting,lyu2021bigdata}. These methods remain attractive because they are interpretable, computationally light, and theoretically well understood. In settings with stable seasonality and relatively smooth temporal structure, such models can provide strong baselines. For aggregate traffic or passenger series, they often perform reasonably well when the forecasting horizon is short and the signal is dominated by linear dependence \cite{petropoulos2020forecasting}.
+The earliest literature on transportation demand forecasting was dominated by statistical and econometric models. 
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/2.1.png}
+	\caption{Overview of representative traffic forecasting approaches, including traditional statistical models, classical machine learning methods, and deep temporal sequence models, with the latter further divided into recurrent and multi-scale or long-context architectures.}
+	\label{fig:2.1}
+\end{figure}
+
+
+Classical methods included autoregressive integrated moving average models, seasonal ARIMA variants, exponential smoothing, Poisson and negative binomial regression, and state-space formulations \cite{petropoulos2020forecasting,lyu2021bigdata}. These methods remain attractive because they are interpretable, computationally light, and theoretically well understood. In settings with stable seasonality and relatively smooth temporal structure, such models can provide strong baselines. For aggregate traffic or passenger series, they often perform reasonably well when the forecasting horizon is short and the signal is dominated by linear dependence \cite{petropoulos2020forecasting}.
 
 However, taxi demand forecasting at the zone level quickly exposes the limits of such models. First, linear autoregressive methods assume relatively simple dependence structures and struggle when multiple temporal scales interact nonlinearly. Second, they are poorly suited to sparse or highly intermittent zones where many observations are zero or near-zero \cite{zhuang2022sparse}. Third, classical models generally treat each spatial unit independently unless augmented with hand-designed exogenous terms or multivariate extensions, which become difficult to scale in city-wide settings \cite{jiang2022survey,safikhani2017nyc}. Fourth, the assumptions required for stationarity, residual independence, or parametric count structure are often violated by urban mobility data \cite{lyu2021bigdata}. These weaknesses motivated the field to adopt machine learning methods capable of handling high-dimensional nonlinearity more flexibly.
 
@@ -257,6 +283,14 @@ These limitations are directly relevant to the current project. The system is de
 \section{Deep Temporal Sequence Models for Demand Forecasting}
 
 The deep learning literature on forecasting introduced a major shift by replacing manual feature engineering with learned representations. Recurrent neural networks became especially influential because they provide a natural mechanism for modelling sequential dependence. Standard RNNs can, in principle, use previous hidden states to summarise temporal context, but in practice they suffer from vanishing and exploding gradient problems when sequences are long \cite{pascanu2013rnn}. This limitation led to the widespread adoption of Long Short-Term Memory networks and Gated Recurrent Units, both of which use gating mechanisms to regulate information flow and preserve relevant historical context over longer horizons \cite{hochreiter1997lstm,cho2014gru}.
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/2.2.png}
+	\caption{Recurrent and multi-scale temporal modelling for demand forecasting.}
+	\label{fig:2.2}
+\end{figure}
+
 
 In transportation forecasting, LSTM-based models were soon applied to traffic speed, passenger flow, and taxi demand because they captured nonlinear temporal dependence more effectively than traditional autoregressive models \cite{jiang2022survey,lstmtraffic2024survey}. GRUs offered a lighter-weight alternative with fewer parameters and often similar empirical performance \cite{chung2014gru}. In urban demand settings, recurrent models are useful because they can absorb sequential fluctuations without requiring explicit manual design of every lag interaction. They also adapt relatively naturally to rolling one-step-ahead prediction tasks, which is important for hourly operational forecasting.
 
@@ -290,6 +324,8 @@ At the same time, multi-scale models introduce extra design complexity. The more
 
 A recurring lesson in transportation literature is that ``space'' should not be reduced to Euclidean closeness. Two zones may border each other yet function quite differently, while zones farther apart may be tightly linked through mobility behaviour. This is especially true in taxi systems, where trip patterns often follow business corridors, airport routes, nightlife clusters, and commuting flows rather than simple neighbourhood adjacency \cite{jiang2022survey,rong2024odsurvey}. As a result, graph construction itself becomes a research question.
 
+
+
 The most basic graph uses shared physical borders. This is easy to build and intuitively interpretable, but it can be too coarse. Distance-based graphs soften the binary decision by weighting nodes according to geographical separation. These are useful when movement likelihood decays smoothly with distance, but they still fail to capture directed or asymmetric travel relationships. Mobility-flow graphs improve on this by using actual trip movement between regions. Such graphs can encode strong functional dependence even when geography alone would not. Similarity graphs go one step further, linking zones with correlated historical behaviour or comparable temporal signatures \cite{ke2021od,jiang2022survey}.
 
 The present project chooses an origin-destination flow matrix as the basis for graph construction. In literature terms, this is a strong choice because it ties the graph to actual travel interaction. The system maps zones through a lookup table and constructs adjacency when flow weight is positive. This means the graph is operationally grounded in the data-generating process, not merely overlaid as a generic structure. For a taxi-demand problem, this is more meaningful than an arbitrary lattice or shapefile-only adjacency \cite{ke2021od,wang2024od}.
@@ -300,6 +336,14 @@ The literature on dynamic graphs is also relevant here. Urban mobility relations
 \section{Graph Neural Networks for Transportation Forecasting}
 
 Graph neural networks became central in transportation forecasting because they allow node representations to be updated through learned neighbourhood aggregation. In road traffic, the intuition is straightforward: nearby sensors influence one another through network flow. In taxi demand forecasting, the same principle applies more abstractly at the zone level: regions linked through travel behaviour or proximity may share demand dynamics or error structure. GNNs convert this intuition into learnable operators.
+
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/2.3.png}
+	\caption{GraphSAGE-based refinement uses neighbourhood aggregation on the taxi-zone graph to learn residual corrections from base predictions, confidence weights, and optional historical features, producing a refined forecast for each zone.}
+	\label{fig:2.3}
+\end{figure}
 
 Early graph convolutional methods generally relied on spectral formulations or fixed graph filters. Later spatial GNNs, including Graph Convolutional Networks, Graph Attention Networks, and GraphSAGE, shifted focus toward more flexible neighbourhood aggregation. Graph Attention Networks learn to weight neighbours through attention coefficients. GraphSAGE learns how to aggregate neighbourhood features and is often favoured for scalability and inductive behaviour. In transportation literature, no single GNN variant is universally best; performance depends heavily on graph type, feature design, horizon, and training protocol.
 
@@ -333,7 +377,23 @@ The literature suggests that this design could be expanded. Instead of only simp
 
 \section{Confidence Fusion as an Emerging Research Direction}
 
-The notion of confidence fusion deserves special attention because it is one of the most distinctive aspects of the project. Confidence is not derived from one metric alone. Instead, it combines three components: a prior score based on historical data richness, a stability score derived from MC variance, and a neighbourhood agreement score computed from graph neighbours. These are then merged through a weighted logarithmic combination into a final confidence score \cite{gal2016dropout,zhuang2022sparse}.
+The notion of confidence fusion deserves special attention because it is one of the most distinctive aspects of the project. Confidence is not derived from one metric alone. Instead, it combines three components: a prior score $p_i$ based on the historical data richness of zone $i$, a stability score $s_i$ derived from the predictive variance estimated by Monte Carlo Dropout, and a neighbourhood agreement score $n_i$ computed from the consistency between the prediction for zone $i$ and the predictions of its graph neighbours. These components are merged through a weighted logarithmic combination to produce the final confidence score $c_i$:
+\[
+\log c_i = w_p \log p_i + w_s \log s_i + w_n \log n_i,
+\]
+where $w_p$, $w_s$, and $w_n$ are the fusion weights assigned to the prior, stability, and neighbourhood components, respectively. Equivalently, this can be written as
+\[
+c_i = \exp\!\left(w_p \log p_i + w_s \log s_i + w_n \log n_i\right).
+\]
+In the current implementation, the weights are fixed as $w_p = 0.3$, $w_s = 0.4$, and $w_n = 0.3$ \cite{gal2016dropout,zhuang2022sparse}.
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/2.4.png}
+	\caption{Confidence fusion integrates prior score, stability score, and neighbourhood agreement into a final confidence score for confidence-aware graph refinement.}
+	\label{fig:2.4}
+\end{figure}
+
 
 This design is interesting in relation to literature because it implicitly blends three epistemic perspectives. Historical sufficiency reflects how much evidence the model has seen for a zone. Stability reflects the model's internal consistency under stochastic perturbation. Neighbourhood agreement reflects external structural plausibility relative to connected zones. Very few standard forecasting pipelines combine all three explicitly, and even fewer use the result to weight graph loss. In that sense, the project is making a meaningful methodological move beyond generic uncertainty estimation \cite{wang2024probgnn,park2022confidenceaware}.
 
@@ -407,6 +467,13 @@ The methodology has been designed to support three goals simultaneously. The fir
 
 \section{Problem Setup}
 \label{sec:problem-setup}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/3.1.png}
+	\caption{Illustration of the problem setup used in this thesis. Hourly taxi pickup counts are modelled at the zone level, where a per-zone temporal predictor first generates a base forecast and a graph refinement stage then learns a residual correction on the taxi-zone graph. The framework is evaluated under a rolling forecasting protocol using ground-truth hourly counts and step-wise error metrics.}
+	\label{fig:3.1}
+\end{figure}
 
 \subsection{Forecasting Objective}
 
@@ -618,6 +685,14 @@ These features serve as low-dimensional summaries of recent demand history. Thei
 
 The first stage of the method is a multi-scale temporal predictor trained independently for each zone. The central design hypothesis is that urban taxi demand cannot be represented adequately by one temporal horizon alone. A purely short-window model may react to recent fluctuations but fail to preserve weekly repetition or slower trends. A purely long-window model may encode broader context but blur immediate local shifts. The methodology therefore uses a multi-branch design in which distinct encoders are assigned to different temporal horizons and their representations are fused before the final prediction step \cite{liao2022taxi,huang2021multiresolution,lim2021survey}.
 
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/3.2.png}
+	\caption{Stage-one temporal forecasting pipeline for each taxi zone. Multi-scale inputs from 1 hour, 1 day, 1 week, and 1 month are encoded by branch-specific modules, fused into a longer-term trend representation, and combined with the short-term signal in a GRU-based output pathway to generate the next-hour demand prediction in the original scale.}
+	\label{fig:3.2}
+\end{figure}
+
+
 This architecture is also shaped by the practical nature of the forecasting target. Because the task is one-step-ahead hourly prediction, the system does not need a full sequence-to-sequence decoder. Instead, it needs a compact but expressive representation of recent dynamics that can map directly to the next hour. The branch encoders and fusion module are therefore designed to extract complementary embeddings rather than to reconstruct the whole future trajectory.
 
 \subsection{Per-Zone Temporal Modelling}
@@ -766,6 +841,14 @@ The confidence assigned to each zone at each rolling step is built from three so
 \end{enumerate}
 These components are then fused into a single confidence value that is used as a node-level weight in the graph stage \cite{wang2024gnnuncertaintysurvey,park2022confidenceaware}.
 
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/3.3.png}
+	\caption{Confidence construction pipeline. Predictive uncertainty from Monte Carlo Dropout, historical prior information, and neighbourhood consistency are fused into a single node-level confidence score for weighted graph refinement.}
+	\label{fig:3.3}
+\end{figure}
+
 \subsection{Monte Carlo Dropout for Predictive Uncertainty}
 
 Monte Carlo Dropout is used to estimate predictive uncertainty in the temporal stage. During inference, dropout remains active, and the same input is passed through the network multiple times. Let
@@ -885,6 +968,14 @@ The confidence mechanism does not suppress uncertain zones entirely, because unc
 \subsection{Motivation for Spatial Refinement}
 
 The temporal stage models each zone independently. This is valuable for local specialisation, but it leaves an important weakness unresolved: independent temporal models do not explicitly enforce spatial coherence. In a mobility system, zones interact through travel flows, commuting patterns, and network effects. If one zone experiences a surge while its strongly connected neighbours do not, the discrepancy may indicate either a true local anomaly or an error in the temporal estimate \cite{jiang2022survey,ke2021od}. The graph stage is introduced precisely to handle this kind of structured interaction.
+
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/3.4.png}
+	\caption{Graph-based residual refinement at each rolling step. The hourly taxi-zone graph is built from valid nodes, baseline predictions, confidence scores, and historical features, and a two-layer GraphSAGE model learns residual corrections that are added to the temporal baseline to obtain the final refined forecast. Confidence is injected through node-weighted loss rather than direct edge-weighted message passing.}
+	\label{fig:3.4}
+\end{figure}
 
 Rather than building a graph model that predicts demand directly from node features alone, the methodology adopts a residual refinement strategy. The baseline temporal predictions are treated as strong priors, and the graph network learns how much these priors should be adjusted in light of spatial context. This makes the graph stage a corrective mechanism rather than a replacement predictor \cite{shao2022d2stgnn}.
 
@@ -1066,6 +1157,13 @@ Although the current design still leaves room for stronger graph validation, exp
 	\section{Overview}
 	
 	This chapter describes the concrete implementation of the proposed two-stage, confidence-weighted forecasting framework. Whereas the previous chapter introduced the methodology at an algorithmic level, this chapter explains how the system is realised in the codebase, how the major modules interact, and how data moves from raw taxi records to temporal predictions, graph-refined outputs, and final evaluation files. The implementation is organised around three principal Python modules. The first is \texttt{demo\_rolling\_GNN.py}, which acts as the top-level rolling driver. It loads data, prepares lookup tables and adjacency structures, controls the rolling loop, computes confidence scores, calls the temporal model manager, invokes the graph refinement stage, and writes the main output files. The second is \texttt{persistent\_multiscale\_confi.py}, which implements the per-zone multi-scale temporal model and its checkpoint manager. The third is \texttt{gnn\_model.py}, which implements the GraphSAGE residual refinement model and the graph-stage training pipeline. This division of responsibilities is visible in the driver script, where the graph pipeline is imported from \texttt{gnn\_model.py}, while the default temporal manager is imported from \texttt{persistent\_multiscale\_confi.py}; the incremental manager is present as an alternative import but is not enabled by default in the current script.
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/4.1.png}
+		\caption{Graph-based residual refinement at each rolling step. The hourly taxi-zone graph is built from valid nodes, baseline predictions, confidence scores, and historical features, and a two-layer GraphSAGE model learns residual corrections that are added to the temporal baseline to obtain the final refined forecast. Confidence is injected through node-weighted loss rather than direct edge-weighted message passing.}
+		\label{fig:4.1}
+	\end{figure}
 	
 	The implementation follows a deliberately modular structure. The temporal stage is isolated inside a model-manager class so that training, checkpoint storage, loading, scaling, inference, and uncertainty estimation are all handled through a consistent interface. The graph stage is separated into its own pipeline so that it receives a clean table of predictions, labels, historical features, and confidence values from the rolling driver. The driver script then coordinates the two stages at each target hour. This design makes the system easier to debug and to extend: the temporal model can be modified without rewriting the graph refinement function, and the graph refinement logic can be changed without altering the data loading and rolling orchestration code.
 	
