@@ -373,7 +373,7 @@ class MultiScaleModelManager:
                 embeddings = model.mc_branch_embeddings(X_tensor, self.cfg.K_mc_train)
                 weights = self._conf_weights_from_embeddings(embeddings)
 
-            # No auxiliary head outputs anymore; use embedding-confidence only to scale main loss if needed
+            # No auxiliary head outputs-0305-24h anymore; use embedding-confidence only to scale main loss if needed
             # Here we approximate by weighting main loss with average confidence across branches
             avg_conf = sum(weights) / len(weights)
             L_aux = (L_main * avg_conf.mean()).detach() * 0.0

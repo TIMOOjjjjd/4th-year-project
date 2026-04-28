@@ -1336,25 +1336,148 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The most important implementation strength is that the system is not a single isolated model script. It is a complete experimental pipeline with explicit data preparation, temporal prediction, uncertainty estimation, confidence fusion, graph refinement, rolling evaluation, and reproducible outputs. At the same time, the codebase clearly exposes the boundaries of the current implementation: persistent reuse is the default, incremental adaptation exists as an alternative import, graph refinement currently trains and evaluates on the same hourly node set, and edge weights are prepared but not yet explicitly used inside GraphSAGE message passing. These implementation details are important because they determine how the experimental results should be interpreted in the following chapter.
 	
-	\chapter{Experiments}
-	\section{Experimental Setup}
-	Describe dataset, metrics, baselines, etc.
+	\section{Experiments}
+	\label{sec:experiments}
 	
-	\section{Results}
-	Example table:
-	\begin{table}[H]
-		\centering
-		\caption{Comparison of model performance}
-		\label{tab:results}
-		\begin{tabular}{lcc}
-			\toprule
-			Model & MAE & RMSE \\
-			\midrule
-			Baseline & 12.34 & 18.56 \\
-			Proposed Method & 10.21 & 15.43 \\
-			\bottomrule
-		\end{tabular}
-	\end{table}
+	\subsection{Experimental Objectives}
+	\label{subsec:experimental_objectives}
+	
+	The purpose of the experimental study is to evaluate whether the proposed forecasting framework improves hourly taxi demand prediction through three progressive design choices: multi-scale temporal modelling, graph-based spatial refinement, and incremental adaptation under a rolling forecasting protocol. Rather than treating the proposed system as a single indivisible model, the experiments are organised as a staged evaluation. This allows each component to be tested independently before the complete pipeline is assessed.
+	
+	The first objective is to evaluate the effectiveness of the proposed multi-scale temporal predictor against standard temporal baselines. In this project, taxi demand is represented as an hourly count sequence for each pickup taxi zone. A single temporal model, such as an LSTM, GRU, or Transformer, can learn temporal dependency from historical demand, but each architecture tends to favour a particular type of temporal pattern. LSTM and GRU models are effective for recurrent sequence modelling, while Transformer models can capture longer-range temporal relationships through self-attention. However, taxi demand often contains multiple temporal scales at the same time, including short-term hourly fluctuation, daily periodicity, weekly commuting patterns, and longer-term monthly trends. The proposed temporal backbone is therefore designed as a multi-scale model, using separate temporal branches to encode different historical windows before fusing them into a GRU-based prediction head. The first experiment therefore asks whether the multi-scale structure provides a measurable improvement over single-model temporal baselines.
+	
+	The second objective is to examine whether graph-based refinement improves the predictions produced by the temporal model. The base temporal model treats each taxi zone primarily as an independent time series. Although this captures zone-specific demand history, it does not fully model the dependency between spatially or functionally related zones. In an urban mobility setting, demand in one zone can be correlated with demand in neighbouring or flow-connected zones. For example, a demand increase in a transport hub, business district, or entertainment area may affect nearby zones through passenger movement and vehicle redistribution. To account for this dependency, the second stage of the proposed framework applies a GraphSAGE-based residual refinement model on a taxi-zone graph constructed from origin--destination flow relationships. The GNN does not replace the temporal prediction; instead, it learns a correction term on top of the temporal output. The second experiment therefore compares the temporal-only prediction against the graph-refined prediction.
+	
+	The third objective is to test whether confidence weighting improves the robustness of graph refinement. The proposed system estimates node-level confidence using three complementary signals: a prior score based on historical data sufficiency, a stability score based on MC Dropout variance, and a neighbourhood consistency score based on agreement with graph neighbours. These three components are combined into a single confidence value for each taxi zone. During GNN training, this confidence value is used as a sample weight so that more reliable nodes have stronger influence on the residual learning process, while uncertain or unstable nodes are down-weighted. This experiment evaluates whether confidence-weighted GNN refinement performs better than unweighted GNN refinement, especially in rolling prediction where model uncertainty and sparse demand zones can introduce instability.
+	
+	The fourth objective is to evaluate the role of incremental training in the rolling forecasting setting. The non-incremental version of the system trains a model and then reuses the stored checkpoint for later target hours. This reduces computational cost, but it may become less adaptive as the rolling target moves forward and new observations become available. The incremental version is intended to update the model using newly available recent data, rather than repeatedly training from scratch or reusing an increasingly stale checkpoint. The final experiment therefore compares the persistent non-incremental implementation with the incremental implementation. The main focus is not only average error reduction, but also stability over time, measured by the variation of hourly errors across rolling steps.
+	
+	Accordingly, the experimental section is structured around the following research questions:
+	
+	\begin{itemize}
+		\item \textbf{RQ1:} Does the proposed multi-scale temporal model outperform single temporal baselines such as LSTM, GRU, and Transformer?
+		\item \textbf{RQ2:} Does GraphSAGE-based residual refinement improve the prediction accuracy of the temporal model?
+		\item \textbf{RQ3:} Does confidence-weighted graph refinement improve robustness compared with unweighted graph refinement?
+		\item \textbf{RQ4:} Does incremental training improve rolling forecasting stability compared with non-incremental checkpoint reuse?
+	\end{itemize}
+	
+	These research questions define a progressive experimental path from simple baselines to the complete system. The intended comparison order is: single temporal models, multi-scale temporal model, multi-scale model with GNN refinement, multi-scale model with confidence-weighted GNN refinement, and finally the full confidence-weighted model with incremental updating. This structure ensures that any improvement can be attributed to a specific modelling choice rather than only to the final combined architecture.
+	
+	\subsection{Dataset and Preprocessing}
+	\label{subsec:dataset_preprocessing}
+	
+	The experiments are conducted on taxi trip records aggregated at the taxi-zone level. Each raw trip record contains at least a pickup timestamp and a pickup location identifier. The pickup timestamp is used to assign the trip to an hourly time interval, while the pickup location identifier is used to assign the trip to a taxi zone. The forecasting task is formulated as one-step-ahead hourly demand prediction. For each taxi zone and each target hour, the model predicts the number of pickup events that will occur in that zone during the next hour.
+	
+	The raw input file is stored as a Parquet file and contains the fields \texttt{pickup\_datetime} and \texttt{PULocationID}. During preprocessing, the timestamp is converted into a datetime object and rounded down to the nearest hour. This produces an hourly timestamp field, denoted as \texttt{datetime}, which is used as the temporal index for aggregation. The demand value for a taxi zone at a given hour is then computed as the number of pickup records whose \texttt{PULocationID} equals the zone identifier and whose pickup time falls within that hour. Formally, for zone $i$ and hour $t$, the demand value is defined as:
+	\[
+	y_{i,t} = \sum_{r \in \mathcal{D}} \mathbb{I}(z_r = i) \mathbb{I}(\tau_r \in [t, t+1)),
+	\]
+	where $\mathcal{D}$ denotes the set of trip records, $z_r$ is the pickup zone of record $r$, $\tau_r$ is its pickup time, and $\mathbb{I}(\cdot)$ is an indicator function.
+	
+	Several zones are excluded from the experiments to avoid invalid or highly irregular locations. In the current implementation, the excluded zone list is:
+	\[
+	\{103, 104, 105, 46, 264, 265\}.
+	\]
+	These zones are removed before both temporal modelling and graph refinement. This ensures that all evaluated models operate on the same set of valid taxi zones. After filtering, the remaining records are grouped by \texttt{PULocationID} and \texttt{datetime} to form the core hourly demand table.
+	
+	The temporal model uses a fixed historical context to predict the next hour. The main multi-scale model uses four temporal views: a short one-hour view, a daily view of 24 hours, a weekly view of 168 hours, and a monthly-scale view of 720 hours. These windows are selected to reflect the expected periodicity of urban taxi demand. The one-hour view captures immediate demand state, the daily view captures intra-day repetition, the weekly view captures weekday and weekend structure, and the monthly view captures longer-term trend information. Missing hours within a zone-level sequence are filled with zero demand, producing a dense hourly time series for each zone. This is necessary because the neural models require continuous input windows with fixed length.
+	
+	Before model training, the zone-level passenger count series is normalised using min--max scaling. Scaling is fitted on the historical portion available before the prediction target, so that future target information is not used during preprocessing. The scaled series is then converted into sliding windows. For each valid training window, the model receives historical sequences from the four temporal scales and predicts the demand value at the next forecasting step. The prediction horizon is set to one hour, which is consistent with the objective of short-term operational demand forecasting.
+	
+	In addition to temporal features, the graph refinement stage requires a taxi-zone graph. This graph is constructed from an origin--destination flow matrix stored as \texttt{edge\_weight\_matrix\_with\_flow.csv}. Each node represents a taxi zone, and an edge is created when the corresponding flow relationship between two zones is non-zero. The zone lookup table, stored as \texttt{taxi-zone-lookup.csv}, maps between zone names and numeric location identifiers. This mapping is required because the graph matrix is indexed by zone names, whereas the prediction results are indexed by \texttt{PULocationID}. During GNN preparation, the adjacency matrix is converted into a sparse edge representation suitable for graph neural network computation.
+	
+	For each rolling target hour, the temporal model first generates a base prediction for each valid zone. The output table contains the zone identifier, predicted demand, true demand, MC Dropout standard deviation, variance, and additional historical mean features. The historical mean features are computed over three windows:
+	\[
+	24\text{h}, \quad 168\text{h}, \quad 720\text{h}.
+	\]
+	These features provide the GNN with simple demand-level context in addition to the base model prediction. The GNN input for each node therefore includes the temporal prediction, a node weight or confidence value, and optionally the historical mean features. The supervised target for the GNN is not the raw demand value directly, but the residual between the ground truth and the temporal prediction:
+	\[
+	r_{i,t} = y_{i,t} - \hat{y}^{\,\text{temp}}_{i,t}.
+	\]
+	The refined prediction is then obtained by adding the predicted residual back to the temporal prediction:
+	\[
+	\hat{y}^{\,\text{refined}}_{i,t}
+	=
+	\hat{y}^{\,\text{temp}}_{i,t}
+	+
+	\hat{r}_{i,t}.
+	\]
+	
+	The experiments follow a rolling forecasting protocol. A starting target time is selected, and the system advances by one hour at each rolling step. At every step, all valid zones are predicted for the current target hour, evaluated against observed counts, and then passed to the graph refinement stage. This protocol is closer to practical deployment than a single static train--test split because it evaluates the model repeatedly as the forecast origin moves forward in time.
+	
+	\subsection{Evaluation Protocol and Metrics}
+	\label{subsec:evaluation_protocol_metrics}
+	
+	All models are evaluated under the same one-hour-ahead forecasting setting. For a target hour $t$, each model is allowed to use historical observations up to the context endpoint before the target. The target value is the observed passenger demand during hour $t$. This protocol avoids future information leakage and ensures that the comparison between models is fair. The same filtered taxi-zone set, same rolling target hours, and same historical context definition are used across the temporal baselines, the proposed multi-scale model, and the graph-refined variants.
+	
+	The first group of experiments compares temporal-only models. The baseline models include LSTM, GRU, and Transformer predictors. Each baseline receives historical demand sequences and predicts the next-hour demand for each taxi zone. The proposed multi-scale temporal model is then evaluated under the same rolling target setting. The purpose of this comparison is to determine whether explicit multi-scale temporal encoding improves predictive performance over single-architecture sequence models. No graph information is used in this first comparison, so the results isolate the contribution of the temporal backbone.
+	
+	The second group of experiments evaluates graph refinement. The best temporal model from the first group is used as the base predictor. Its output is passed to the GraphSAGE refinement module, which learns zone-level residual corrections on the OD-flow graph. The temporal-only prediction and the GNN-refined prediction are evaluated on the same target hours and zones. This comparison isolates the effect of spatial message passing and residual correction. The graph-refined model is considered beneficial if it reduces error relative to the temporal-only prediction while preserving stable behaviour across rolling steps.
+	
+	The third group of experiments evaluates confidence weighting. In the unweighted setting, all valid nodes contribute equally to the GNN loss. In the confidence-weighted setting, each node is weighted according to its confidence score. The confidence score combines historical data sufficiency, MC Dropout stability, and neighbourhood consistency. This experiment is designed to test whether uncertain nodes should have reduced influence during graph residual learning. In addition to average prediction error, this comparison considers the stability of error across rolling steps, because confidence weighting is expected to reduce extreme fluctuations caused by unreliable zones.
+	
+	The fourth group of experiments compares non-incremental and incremental rolling training. In the non-incremental setting, the model checkpoint is reused after the initial training stage. In the incremental setting, the model is updated using newly available recent observations as the target hour moves forward. This comparison evaluates whether incremental updating can improve adaptation to recent demand changes. Since incremental training is primarily motivated by rolling stability, the analysis includes both average error and temporal error variation.
+	
+	The primary evaluation metrics are mean absolute error, root mean squared error, and mean squared error. Mean absolute error is defined as:
+	\[
+	\mathrm{MAE}
+	=
+	\frac{1}{N}
+	\sum_{i=1}^{N}
+	\left| y_i - \hat{y}_i \right|,
+	\]
+	where $N$ is the number of evaluated zone-hour predictions, $y_i$ is the observed demand, and $\hat{y}_i$ is the predicted demand. MAE is the main metric because it is directly interpretable as the average absolute passenger-count error.
+	
+	Mean squared error is defined as:
+	\[
+	\mathrm{MSE}
+	=
+	\frac{1}{N}
+	\sum_{i=1}^{N}
+	\left( y_i - \hat{y}_i \right)^2.
+	\]
+	MSE penalises large errors more strongly than MAE and is therefore useful for detecting whether a model produces severe mistakes in high-demand or unstable zones.
+	
+	Root mean squared error is defined as:
+	\[
+	\mathrm{RMSE}
+	=
+	\sqrt{
+		\frac{1}{N}
+		\sum_{i=1}^{N}
+		\left( y_i - \hat{y}_i \right)^2
+	}.
+	\]
+	RMSE has the same unit as the target demand value and is easier to interpret than MSE while still giving greater weight to large errors.
+	
+	For the rolling setting, the metrics are computed at two levels. First, hourly metrics are computed for each target hour using all valid taxi zones in that hour. This produces an error sequence over rolling steps:
+	\[
+	\{\mathrm{MAE}_1, \mathrm{MAE}_2, \ldots, \mathrm{MAE}_T\}.
+	\]
+	Second, overall metrics are computed by aggregating all valid zone-hour predictions across the complete rolling horizon. The hourly metrics are used to analyse temporal stability, while the overall metrics are used to compare average predictive performance.
+	
+	To evaluate rolling stability, the standard deviation of hourly MAE is also reported:
+	\[
+	\sigma_{\mathrm{MAE}}
+	=
+	\sqrt{
+		\frac{1}{T}
+		\sum_{t=1}^{T}
+		\left(
+		\mathrm{MAE}_t - \overline{\mathrm{MAE}}
+		\right)^2
+	}.
+	\]
+	A lower value indicates that the model produces more consistent performance across rolling target hours. This metric is particularly important for comparing incremental and non-incremental training, because a model with slightly better average MAE but highly unstable hourly behaviour may be less suitable for deployment than a model with stable performance.
+	
+	The final evaluation tables therefore report MAE, RMSE, MSE, hourly MAE standard deviation, and the worst-hour MAE where appropriate. The worst-hour MAE is included to identify whether a method reduces extreme failure cases:
+	\[
+	\mathrm{WorstHourMAE}
+	=
+	\max_{t \in \{1,\ldots,T\}}
+	\mathrm{MAE}_t.
+	\]
+	Together, these metrics provide a more complete evaluation than average error alone. MAE and RMSE measure overall predictive accuracy, MSE highlights large errors, hourly MAE standard deviation measures rolling stability, and worst-hour MAE captures the robustness of the model under difficult target hours.
 	
 	\chapter{Discussion}
 	Discuss strengths, limitations, and interpretation of results.

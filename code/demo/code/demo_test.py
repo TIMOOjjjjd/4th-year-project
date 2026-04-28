@@ -12,7 +12,20 @@ import pandas as pd
 import torch
 
 
-MODEL_BACKEND = "lstm"  # "lstm", "gru", "transformer", or "multiscale"
+# # === 临时调试：启动时自动清理旧 checkpoint 目录 ===
+import shutil
+import os
+for f in os.listdir('.'):
+    if f.startswith("checkpoints_") and os.path.isdir(f):
+        try:
+            shutil.rmtree(f)
+            print(f"[debug] deleted old checkpoint directory: {f}")
+        except Exception as e:
+            print(f"[debug] failed to delete {f}: {e}")
+# # === 结束 ===
+
+
+MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", or "multiscale"
 
 if MODEL_BACKEND == "lstm":
     from persistent_lstm import ManagerConfig, PureLSTMModelManager as ModelManager
@@ -33,8 +46,8 @@ DATA_PATH = BASE_DIR / "data.parquet"
 CHECKPOINT_DIR = BASE_DIR / f"checkpoints_{MODEL_BACKEND}_test"
 OUTPUT_DIR = BASE_DIR / "outputs"
 
-START_TARGET = pd.Timestamp("2021-03-05 00:00")
-ROLLING_STEPS = 2
+START_TARGET = pd.Timestamp("2021-07-05 00:00")
+ROLLING_STEPS = 24
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 CLEAN_CHECKPOINTS_ON_START = False
 
