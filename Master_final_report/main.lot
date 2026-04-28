@@ -2,9 +2,11 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {4.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{98}{table.caption.17}%
-\contentsline {table}{\numberline {4.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{99}{table.caption.18}%
-\contentsline {table}{\numberline {4.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{100}{table.caption.19}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{94}{table.caption.17}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{94}{table.caption.18}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{96}{table.caption.19}%
+\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{98}{table.caption.20}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }

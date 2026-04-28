@@ -1336,8 +1336,8 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The most important implementation strength is that the system is not a single isolated model script. It is a complete experimental pipeline with explicit data preparation, temporal prediction, uncertainty estimation, confidence fusion, graph refinement, rolling evaluation, and reproducible outputs. At the same time, the codebase clearly exposes the boundaries of the current implementation: persistent reuse is the default, incremental adaptation exists as an alternative import, graph refinement currently trains and evaluates on the same hourly node set, and edge weights are prepared but not yet explicitly used inside GraphSAGE message passing. These implementation details are important because they determine how the experimental results should be interpreted in the following chapter.
 	
-	\section{Experiments}
-	\label{sec:experiments}
+	\chapter{Experiments}
+	\label{chap:experiments}
 	
 	\subsection{Experimental Objectives}
 	\label{subsec:experimental_objectives}
@@ -1574,6 +1574,70 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Overall, the temporal baseline experiment demonstrates that the proposed multi-scale design is more effective than using a single LSTM, GRU, or Transformer model. The result supports the motivation that taxi demand contains multiple temporal patterns that cannot be fully captured by a single temporal scale. By combining short-term, daily, weekly, and monthly-scale temporal information, the proposed temporal model produces more accurate predictions before any graph-based spatial correction is applied. This establishes a stronger base predictor for the subsequent GNN refinement and confidence-weighted experiments.
 	
+	
+	\subsection{Experiment 2: Effect of Graph-based Residual Refinement}
+	\label{subsec:experiment_2_graph_refinement}
+	
+	This experiment evaluates whether graph-based residual refinement improves the prediction accuracy of the multi-scale temporal model. The temporal-only model is used as the base predictor, and the GraphSAGE module is applied as a second-stage correction model on the taxi-zone graph. The purpose of this experiment is to isolate the contribution of the graph refinement stage before introducing confidence weighting and incremental training in later experiments.
+	
+	Three model variants are compared in this experiment:
+	
+	\begin{itemize}
+		\item \textbf{T4: Multi-scale Temporal}. This is the temporal-only model. It uses the multi-scale temporal architecture to generate the base prediction for each taxi zone, but does not use graph information.
+		\item \textbf{G1: Multi-scale + GNN}. This model uses the T4 prediction as the base prediction and applies GraphSAGE to learn a residual correction on the taxi-zone graph.
+		\item \textbf{G2: Multi-scale + GNN + History Features}. This model extends G1 by adding historical mean features, including \texttt{mean\_24h}, \texttt{mean\_168h}, and \texttt{mean\_720h}, to the GNN input.
+	\end{itemize}
+	
+	In both G1 and G2, the GNN is trained to predict the residual between the observed demand and the temporal prediction. Let $\hat{y}^{\text{temp}}_{i,t}$ denote the prediction produced by the multi-scale temporal model for zone $i$ at target hour $t$, and let $y_{i,t}$ denote the observed demand. The residual target is defined as:
+	\[
+	r_{i,t} = y_{i,t} - \hat{y}^{\text{temp}}_{i,t}.
+	\]
+	The graph model predicts $\hat{r}_{i,t}$, and the final refined prediction is obtained as:
+	\[
+	\hat{y}^{\text{refined}}_{i,t}
+	=
+	\hat{y}^{\text{temp}}_{i,t}
+	+
+	\hat{r}_{i,t}.
+	\]
+	Therefore, the GNN does not replace the temporal model. Instead, it operates as a graph-based residual correction module.
+	
+	The experiment is conducted over 24 rolling target hours from \texttt{2021-03-05 00:00:00} to \texttt{2021-03-05 23:00:00}. For each target hour, 258 valid taxi-zone nodes are used. The graph data are split into 155 training nodes, 52 validation nodes, and 51 test nodes. The reported summary metrics are calculated over the rolling test predictions.
+	
+	\begin{table}[H]
+		\centering
+		\caption{Experiment 2 results: effect of graph-based residual refinement.}
+		\label{tab:experiment_2_graph_refinement}
+		\begin{tabular}{lrrrr}
+			\toprule
+			\textbf{Model} & \textbf{MAE $\downarrow$} & \textbf{RMSE $\downarrow$} & \textbf{MSE $\downarrow$} & \textbf{MAE Improvement} \\
+			\midrule
+			T4: Multi-scale Temporal & 33.4804 & 51.9800 & 2701.9194 & -- \\
+			G1: Multi-scale + GNN & 16.2106 & 30.5118 & 930.9674 & 51.58\% \\
+			G2: Multi-scale + GNN + History Features & 16.2040 & 30.3489 & 921.0562 & 51.60\% \\
+			\bottomrule
+		\end{tabular}
+	\end{table}
+	
+	The results show that graph-based residual refinement leads to a substantial improvement over the temporal-only model. Compared with T4, G1 reduces MAE from 33.4804 to 16.2106, corresponding to a 51.58\% reduction in absolute error. RMSE is also reduced from 51.9800 to 30.5118, while MSE decreases from 2701.9194 to 930.9674. This indicates that the temporal-only model still contains systematic zone-level errors that can be corrected by using spatial information from the taxi-zone graph.
+	
+	The improvement from T4 to G1 is the most important finding of this experiment. Since G1 differs from T4 only by the addition of the GraphSAGE residual refinement stage, the large reduction in error demonstrates that the graph structure provides useful information for correcting temporal predictions. This supports the assumption that taxi demand is not only temporally dependent, but also spatially coupled across zones. In other words, the demand error in one zone can be partially explained by patterns in neighbouring or flow-connected zones.
+	
+	Adding historical mean features in G2 produces only a very small additional improvement over G1. The MAE decreases from 16.2106 to 16.2040, which is an absolute reduction of only 0.0066. RMSE decreases from 30.5118 to 30.3489, and MSE decreases from 930.9674 to 921.0562. Although the direction of the change is positive, the difference between G1 and G2 is marginal. Therefore, the main performance gain should be attributed to graph-based residual learning rather than to the additional historical mean features.
+	
+	This result is reasonable because the base multi-scale temporal model has already encoded short-term, daily, weekly, and longer-term temporal patterns through its multi-branch architecture. As a result, simple historical averages such as \texttt{mean\_24h}, \texttt{mean\_168h}, and \texttt{mean\_720h} may provide partially redundant information to the GNN. These features describe the general demand level of each zone, but they do not necessarily capture complex temporal variations beyond what is already represented in the temporal prediction itself.
+	
+	The hourly results further support this conclusion. G1 improves over T4 in 23 out of 24 rolling target hours, while G2 improves over T4 in all 24 target hours. The average hourly MAE reduction is 45.48\% for G1 and 46.06\% for G2. The largest improvement occurs during the early morning hours, where the temporal-only model produces relatively large errors and the GNN correction is able to reduce them substantially. For example, at \texttt{2021-03-05 02:00:00}, the T4 MAE is 46.2276, while G1 reduces it to 5.5914 and G2 reduces it to 6.2358. This demonstrates that graph refinement is particularly effective when the temporal-only model makes large zone-level prediction errors.
+	
+	However, the comparison between G1 and G2 is mixed at the hourly level. G2 achieves lower MAE than G1 in 9 out of 24 target hours, while G1 performs better in the remaining 15 hours. This confirms that historical mean features do not provide a consistent advantage across all rolling steps. In some hours, these features slightly improve the GNN correction, while in others they may introduce redundant or weakly informative signals. Therefore, G2 can be interpreted as a minor extension of G1 rather than a fundamentally stronger model.
+	
+	The stability of the graph-refined models is also improved compared with the temporal-only baseline. The standard deviation of hourly MAE decreases from 12.9205 for T4 to 7.8025 for G1 and 7.7846 for G2. This suggests that graph refinement not only reduces the average prediction error, but also makes the rolling performance more stable across target hours. This is important for practical forecasting systems, where consistent performance is often as important as the average error.
+	
+	Overall, Experiment 2 demonstrates that graph-based residual refinement is highly effective for improving multi-zone taxi demand forecasting. The large performance gap between T4 and G1 confirms the value of introducing spatial structure after temporal prediction. The small difference between G1 and G2 suggests that historical mean features are only auxiliary and should not be treated as the main source of improvement. Therefore, the key conclusion from this experiment is:
+	\[
+	\text{T4} \ll \text{G1} \approx \text{G2}.
+	\]
+	That is, the main improvement comes from the GraphSAGE residual refinement stage, while the additional historical mean features provide only marginal extra benefit.
 	
 	
 	
