@@ -96,6 +96,7 @@
 \contentsline {subsection}{\numberline {4.13.1}Experimental Objectives}{90}{subsection.4.13.1}%
 \contentsline {subsection}{\numberline {4.13.2}Dataset and Preprocessing}{92}{subsection.4.13.2}%
 \contentsline {subsection}{\numberline {4.13.3}Evaluation Protocol and Metrics}{95}{subsection.4.13.3}%
-\contentsline {chapter}{\numberline {5}Discussion}{99}{chapter.5}%
-\contentsline {chapter}{\numberline {6}Conclusion}{100}{chapter.6}%
-\contentsline {chapter}{\numberline {A}Additional Materials}{101}{appendix.A}%
+\contentsline {subsection}{\numberline {4.13.4}Experiment 1: Temporal Baseline Comparison}{97}{subsection.4.13.4}%
+\contentsline {chapter}{\numberline {5}Discussion}{103}{chapter.5}%
+\contentsline {chapter}{\numberline {6}Conclusion}{104}{chapter.6}%
+\contentsline {chapter}{\numberline {A}Additional Materials}{105}{appendix.A}%
