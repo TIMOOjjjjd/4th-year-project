@@ -98,6 +98,9 @@
 \contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{90}{subsection.5.0.3}%
 \contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{93}{subsection.5.0.4}%
 \contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{97}{subsection.5.0.5}%
-\contentsline {chapter}{\numberline {6}Discussion}{101}{chapter.6}%
-\contentsline {chapter}{\numberline {7}Conclusion}{102}{chapter.7}%
-\contentsline {chapter}{\numberline {A}Additional Materials}{103}{appendix.A}%
+\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{100}{subsection.5.0.6}%
+\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{103}{subsection.5.0.7}%
+\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{106}{subsection.5.0.8}%
+\contentsline {chapter}{\numberline {6}Discussion}{111}{chapter.6}%
+\contentsline {chapter}{\numberline {7}Conclusion}{112}{chapter.7}%
+\contentsline {chapter}{\numberline {A}Additional Materials}{113}{appendix.A}%

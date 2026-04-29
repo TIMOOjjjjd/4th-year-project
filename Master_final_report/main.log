@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  28 APR 2026 21:41
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  29 APR 2026 19:13
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -2022,20 +2022,51 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [100]
-Chapter 6.
-[101
+Overfull \hbox (31.41731pt too wide) in paragraph at lines 1663--1674
+ [][] 
+ []
 
-]
-Chapter 7.
-[102
 
-]
-Appendix A.
-[103
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-] [104
+[101]
 
-]
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[102]
+Overfull \hbox (6.53699pt too wide) in paragraph at lines 1712--1713
+[]\T1/lmr/bx/n/12 Non-incremental train-ing\T1/lmr/m/n/12 : the tem-po-ral mode
+l is trained and then reused through
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[103]
+Overfull \hbox (62.05832pt too wide) in paragraph at lines 1724--1735
+ [][] 
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[104]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2044,11 +2075,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [105]
-Overfull \hbox (22.77242pt too wide) in paragraph at lines 1660--1660
-\T1/lmr/m/n/12 line]. Avail-able: [][]$\T1/lmtt/m/n/12 https : / / papers . nip
-s . cc / paper / 6703 -[] inductive -[] representation -[]
- []
-
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2065,6 +2091,60 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [107]
+Underfull \hbox (badness 1264) in paragraph at lines 1792--1793
+\T1/lmr/m/n/12 bone be-cause it cap-tures mul-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 1794--1795
+[]|\T1/lmr/m/n/12 GraphSAGE resid-ual re-fine-
+ []
+
+
+Underfull \hbox (badness 5245) in paragraph at lines 1794--1795
+\T1/lmr/m/n/12 temporal-only model. MAE
+ []
+
+
+Underfull \hbox (badness 7740) in paragraph at lines 1796--1797
+[]|\T1/lmr/m/n/12 Confidence weight-ing pro-vides
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 1796--1797
+\T1/lmr/m/n/12 mod-er-ate ro-bust-ness im-prove-
+ []
+
+
+Underfull \hbox (badness 4391) in paragraph at lines 1796--1797
+\T1/lmr/m/n/12 while neighbourhood-only con-
+ []
+
+
+Underfull \hbox (badness 3690) in paragraph at lines 1796--1797
+\T1/lmr/m/n/12 fi-dence gives the best rolling
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 1798--1799
+[]|\T1/lmr/m/n/12 Incremental train-ing im-proves
+ []
+
+
+Underfull \hbox (badness 1024) in paragraph at lines 1798--1799
+\T1/lmr/m/n/12 both the base tem-po-ral model
+ []
+
+
+Underfull \hbox (badness 8170) in paragraph at lines 1798--1799
+\T1/lmr/m/n/12 and the GNN-refined model.
+ []
+
+
+Underfull \hbox (badness 7433) in paragraph at lines 1798--1799
+\T1/lmr/m/n/12 MAE stan-dard de-vi-a-tion de-
+ []
+
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2073,9 +2153,80 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [108]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[109]
+Overfull \hbox (277.48251pt too wide) detected at line 1814
+[] \OMS/lmsy/m/n/12 ! [] ! [] ! []\OML/lmm/m/it/12 :
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[110]
+Chapter 6.
+[111
+
+]
+Chapter 7.
+[112
+
+]
+Appendix A.
+[113
+
+] [114
+
+]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[115]
+Overfull \hbox (22.77242pt too wide) in paragraph at lines 1834--1834
+\T1/lmr/m/n/12 line]. Avail-able: [][]$\T1/lmtt/m/n/12 https : / / papers . nip
+s . cc / paper / 6703 -[] inductive -[] representation -[]
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[116]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[117]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[118]
 Missing character: There is no č ("10D) in font ec-lmr12!
 
-Overfull \hbox (4.54793pt too wide) in paragraph at lines 1660--1660
+Overfull \hbox (4.54793pt too wide) in paragraph at lines 1834--1834
 []\T1/lmr/m/n/12 Y. Choi et al., ``Hi-er-ar-chi-cal uncertainty-aware graph neu
 -ral net-work,'' \T1/lmr/m/it/12 arXiv preprint
  []
@@ -2087,7 +2238,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[109]
+[119]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2095,7 +2246,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[110] (./main.aux)
+[120] (./main.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-03-20>
@@ -2105,7 +2256,7 @@ L3 programming layer <2026-03-20>
 LaTeX Warning: There were undefined references.
 
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 2F01CC2F8778D312E71639F97FCE29E7;23679.
+(rerunfilecheck)             Checksum: A331115E01AB3FBD43E73A2284E0F748;24597.
 
 Package biblatex Warning: Please (re)run Biber on the file:
 (biblatex)                main
@@ -2116,12 +2267,12 @@ Package logreq Info: Writing requests to 'main.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 24024 strings out of 467992
- 430782 string characters out of 5433178
- 1311428 words of memory out of 5000000
- 52618 multiletter control sequences out of 15000+600000
+ 24036 strings out of 467992
+ 431288 string characters out of 5433178
+ 1313138 words of memory out of 5000000
+ 52630 multiletter control sequences out of 15000+600000
  688901 words of font info for 81 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
  69i,12n,79p,2156b,4965s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on main.pdf (119 pages).
+Output written on main.pdf (129 pages).
