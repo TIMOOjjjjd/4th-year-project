@@ -81,26 +81,35 @@
 \contentsline {section}{\numberline {4.2}Software Structure and Module Responsibilities}{67}{section.4.2}%
 \contentsline {subsection}{\numberline {4.2.1}Top-Level Rolling Driver}{67}{subsection.4.2.1}%
 \contentsline {subsection}{\numberline {4.2.2}Temporal Model and Manager Module}{69}{subsection.4.2.2}%
-\contentsline {subsection}{\numberline {4.2.3}Graph Refinement Module}{70}{subsection.4.2.3}%
+\contentsline {subsection}{\numberline {4.2.3}Graph Refinement Module}{71}{subsection.4.2.3}%
 \contentsline {section}{\numberline {4.3}Data Loading and Preprocessing Implementation}{71}{section.4.3}%
-\contentsline {section}{\numberline {4.4}Temporal Model Implementation}{72}{section.4.4}%
-\contentsline {section}{\numberline {4.5}Confidence Implementation}{74}{section.4.5}%
-\contentsline {section}{\numberline {4.6}Graph Refinement Implementation}{75}{section.4.6}%
-\contentsline {section}{\numberline {4.7}Rolling Pipeline Implementation}{76}{section.4.7}%
-\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{78}{section.4.8}%
-\contentsline {section}{\numberline {4.9}Persistent and Incremental Multi-Scale Managers}{79}{section.4.9}%
-\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{82}{section.4.10}%
-\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{82}{section.4.11}%
-\contentsline {section}{\numberline {4.12}Summary}{83}{section.4.12}%
-\contentsline {chapter}{\numberline {5}Experiments}{85}{chapter.5}%
-\contentsline {subsection}{\numberline {5.0.1}Experimental Objectives}{85}{subsection.5.0.1}%
-\contentsline {subsection}{\numberline {5.0.2}Dataset and Preprocessing}{87}{subsection.5.0.2}%
-\contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{90}{subsection.5.0.3}%
-\contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{93}{subsection.5.0.4}%
-\contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{97}{subsection.5.0.5}%
-\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{100}{subsection.5.0.6}%
-\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{103}{subsection.5.0.7}%
-\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{106}{subsection.5.0.8}%
-\contentsline {chapter}{\numberline {6}Discussion}{111}{chapter.6}%
-\contentsline {chapter}{\numberline {7}Conclusion}{112}{chapter.7}%
-\contentsline {chapter}{\numberline {A}Additional Materials}{113}{appendix.A}%
+\contentsline {section}{\numberline {4.4}Temporal Model Implementation}{73}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Confidence Implementation}{75}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Graph Refinement Implementation}{77}{section.4.6}%
+\contentsline {section}{\numberline {4.7}Rolling Pipeline Implementation}{79}{section.4.7}%
+\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{81}{section.4.8}%
+\contentsline {section}{\numberline {4.9}Persistent and Incremental Multi-Scale Managers}{82}{section.4.9}%
+\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{85}{section.4.10}%
+\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{86}{section.4.11}%
+\contentsline {section}{\numberline {4.12}Summary}{87}{section.4.12}%
+\contentsline {chapter}{\numberline {5}Experiments}{88}{chapter.5}%
+\contentsline {subsection}{\numberline {5.0.1}Experimental Objectives}{88}{subsection.5.0.1}%
+\contentsline {subsection}{\numberline {5.0.2}Dataset and Preprocessing}{90}{subsection.5.0.2}%
+\contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{93}{subsection.5.0.3}%
+\contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{96}{subsection.5.0.4}%
+\contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{100}{subsection.5.0.5}%
+\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{103}{subsection.5.0.6}%
+\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{106}{subsection.5.0.7}%
+\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{109}{subsection.5.0.8}%
+\contentsline {chapter}{\numberline {6}Discussion}{114}{chapter.6}%
+\contentsline {subsection}{\numberline {6.0.1}Overview of the Main Findings}{114}{subsection.6.0.1}%
+\contentsline {subsection}{\numberline {6.0.2}Interpretation of the Multi-scale Temporal Model}{116}{subsection.6.0.2}%
+\contentsline {subsection}{\numberline {6.0.3}Interpretation of Graph-based Residual Refinement}{119}{subsection.6.0.3}%
+\contentsline {subsection}{\numberline {6.0.4}Interpretation of Confidence Weighting}{121}{subsection.6.0.4}%
+\contentsline {subsection}{\numberline {6.0.5}Interpretation of Incremental Training}{124}{subsection.6.0.5}%
+\contentsline {subsection}{\numberline {6.0.6}Practical Implications}{126}{subsection.6.0.6}%
+\contentsline {subsection}{\numberline {6.0.7}Limitations}{128}{subsection.6.0.7}%
+\contentsline {subsection}{\numberline {6.0.8}Future Work}{130}{subsection.6.0.8}%
+\contentsline {subsection}{\numberline {6.0.9}Concluding Discussion}{131}{subsection.6.0.9}%
+\contentsline {chapter}{\numberline {7}Conclusion}{133}{chapter.7}%
+\contentsline {chapter}{\numberline {A}Additional Materials}{138}{appendix.A}%

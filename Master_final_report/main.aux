@@ -709,75 +709,127 @@
 \newlabel{fig:4.1@cref}{{[figure][1][4]4.1}{[1][66][]67}{}{}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4.2}Software Structure and Module Responsibilities}{67}{section.4.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2.1}Top-Level Rolling Driver}{67}{subsection.4.2.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.2}{\ignorespaces Overall workflow of the rolling GNN prediction pipeline, showing data preparation, multiscale temporal prediction, and GraphSAGE-based refinement with confidence weighting.}}{68}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:4.2}{{4.2}{68}{Overall workflow of the rolling GNN prediction pipeline, showing data preparation, multiscale temporal prediction, and GraphSAGE-based refinement with confidence weighting}{figure.caption.17}{}}
+\newlabel{fig:4.2@cref}{{[figure][2][4]4.2}{[1][67][]68}{}{}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2.2}Temporal Model and Manager Module}{69}{subsection.4.2.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.3}Graph Refinement Module}{70}{subsection.4.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.3}Graph Refinement Module}{71}{subsection.4.2.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4.3}Data Loading and Preprocessing Implementation}{71}{section.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.4}Temporal Model Implementation}{72}{section.4.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.5}Confidence Implementation}{74}{section.4.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.6}Graph Refinement Implementation}{75}{section.4.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.7}Rolling Pipeline Implementation}{76}{section.4.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{78}{section.4.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.9}Persistent and Incremental Multi-Scale Managers}{79}{section.4.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{82}{section.4.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{82}{section.4.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4.12}Summary}{83}{section.4.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {chapter}{\numberline {5}Experiments}{85}{chapter.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.3}{\ignorespaces Overall implementation pipeline for rolling taxi-demand prediction, combining data preprocessing, multi-scale temporal forecasting, confidence fusion, GraphSAGE refinement, and metric output generation.}}{72}{figure.caption.18}\protected@file@percent }
+\newlabel{fig:4.3}{{4.3}{72}{Overall implementation pipeline for rolling taxi-demand prediction, combining data preprocessing, multi-scale temporal forecasting, confidence fusion, GraphSAGE refinement, and metric output generation}{figure.caption.18}{}}
+\newlabel{fig:4.3@cref}{{[figure][3][4]4.3}{[1][71][]72}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.4}Temporal Model Implementation}{73}{section.4.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.4}{\ignorespaces Architecture of the multi-scale temporal predictor, where daily and weekly inputs are encoded by LSTM branches, the monthly input is encoded by a Transformer branch, and the fused trend representation is combined with the short-term input before GRU-based next-hour prediction.}}{74}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:4.4}{{4.4}{74}{Architecture of the multi-scale temporal predictor, where daily and weekly inputs are encoded by LSTM branches, the monthly input is encoded by a Transformer branch, and the fused trend representation is combined with the short-term input before GRU-based next-hour prediction}{figure.caption.19}{}}
+\newlabel{fig:4.4@cref}{{[figure][4][4]4.4}{[1][73][]74}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.5}Confidence Implementation}{75}{section.4.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.5}{\ignorespaces Confidence fusion mechanism combining historical prior, MC Dropout-based stability, and neighbourhood prediction agreement into a zone-level confidence score used as the GNN sample weight.}}{76}{figure.caption.20}\protected@file@percent }
+\newlabel{fig:4.5}{{4.5}{76}{Confidence fusion mechanism combining historical prior, MC Dropout-based stability, and neighbourhood prediction agreement into a zone-level confidence score used as the GNN sample weight}{figure.caption.20}{}}
+\newlabel{fig:4.5@cref}{{[figure][5][4]4.5}{[1][75][]76}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.6}Graph Refinement Implementation}{77}{section.4.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.6}{\ignorespaces GraphSAGE residual refinement architecture, where temporal predictions, confidence scores, and historical mean features are used as node inputs, while the OD flow matrix defines the graph structure for learning residual corrections.}}{77}{figure.caption.21}\protected@file@percent }
+\newlabel{fig:4.6}{{4.6}{77}{GraphSAGE residual refinement architecture, where temporal predictions, confidence scores, and historical mean features are used as node inputs, while the OD flow matrix defines the graph structure for learning residual corrections}{figure.caption.21}{}}
+\newlabel{fig:4.6@cref}{{[figure][6][4]4.6}{[1][77][]77}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.7}Rolling Pipeline Implementation}{79}{section.4.7}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.7}{\ignorespaces Rolling execution loop for hourly taxi-demand prediction, uncertainty estimation, confidence assignment, GraphSAGE refinement, and final metric aggregation.}}{79}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:4.7}{{4.7}{79}{Rolling execution loop for hourly taxi-demand prediction, uncertainty estimation, confidence assignment, GraphSAGE refinement, and final metric aggregation}{figure.caption.22}{}}
+\newlabel{fig:4.7@cref}{{[figure][7][4]4.7}{[1][79][]79}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{81}{section.4.8}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.8}{\ignorespaces Comparison between the persistent and incremental temporal managers, showing how stale checkpoints are either reused with a warning or updated through lightweight incremental training before prediction.}}{82}{figure.caption.23}\protected@file@percent }
+\newlabel{fig:4.8}{{4.8}{82}{Comparison between the persistent and incremental temporal managers, showing how stale checkpoints are either reused with a warning or updated through lightweight incremental training before prediction}{figure.caption.23}{}}
+\newlabel{fig:4.8@cref}{{[figure][8][4]4.8}{[1][81][]82}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.9}Persistent and Incremental Multi-Scale Managers}{82}{section.4.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{85}{section.4.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{86}{section.4.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4.12}Summary}{87}{section.4.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {chapter}{\numberline {5}Experiments}{88}{chapter.5}\protected@file@percent }
 \@writefile{lof}{\addvspace {10\p@ }}
 \@writefile{lot}{\addvspace {10\p@ }}
-\newlabel{chap:experiments}{{5}{85}{Experiments}{chapter.5}{}}
-\newlabel{chap:experiments@cref}{{[chapter][5][]5}{[1][85][]85}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.1}Experimental Objectives}{85}{subsection.5.0.1}\protected@file@percent }
-\newlabel{subsec:experimental_objectives}{{5.0.1}{85}{Experimental Objectives}{subsection.5.0.1}{}}
-\newlabel{subsec:experimental_objectives@cref}{{[subsection][1][5,0]5.0.1}{[1][85][]85}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.2}Dataset and Preprocessing}{87}{subsection.5.0.2}\protected@file@percent }
-\newlabel{subsec:dataset_preprocessing}{{5.0.2}{87}{Dataset and Preprocessing}{subsection.5.0.2}{}}
-\newlabel{subsec:dataset_preprocessing@cref}{{[subsection][2][5,0]5.0.2}{[1][87][]87}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{90}{subsection.5.0.3}\protected@file@percent }
-\newlabel{subsec:evaluation_protocol_metrics}{{5.0.3}{90}{Evaluation Protocol and Metrics}{subsection.5.0.3}{}}
-\newlabel{subsec:evaluation_protocol_metrics@cref}{{[subsection][3][5,0]5.0.3}{[1][90][]90}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{93}{subsection.5.0.4}\protected@file@percent }
-\newlabel{subsec:temporal_baseline_comparison}{{5.0.4}{93}{Experiment 1: Temporal Baseline Comparison}{subsection.5.0.4}{}}
-\newlabel{subsec:temporal_baseline_comparison@cref}{{[subsection][4][5,0]5.0.4}{[1][93][]93}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{94}{table.caption.17}\protected@file@percent }
-\newlabel{tab:temporal_baseline_results}{{5.1}{94}{Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period}{table.caption.17}{}}
-\newlabel{tab:temporal_baseline_results@cref}{{[table][1][5]5.1}{[1][93][]94}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{94}{table.caption.18}\protected@file@percent }
-\newlabel{tab:temporal_baseline_improvement}{{5.2}{94}{Relative improvement of the proposed multi-scale model over temporal baselines}{table.caption.18}{}}
-\newlabel{tab:temporal_baseline_improvement@cref}{{[table][2][5]5.2}{[1][94][]94}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{96}{table.caption.19}\protected@file@percent }
-\newlabel{tab:hourly_mae_temporal_models}{{5.3}{96}{Hourly MAE comparison across the 24-hour rolling forecasting period}{table.caption.19}{}}
-\newlabel{tab:hourly_mae_temporal_models@cref}{{[table][3][5]5.3}{[1][95][]96}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{97}{subsection.5.0.5}\protected@file@percent }
-\newlabel{subsec:experiment_2_graph_refinement}{{5.0.5}{97}{Experiment 2: Effect of Graph-based Residual Refinement}{subsection.5.0.5}{}}
-\newlabel{subsec:experiment_2_graph_refinement@cref}{{[subsection][5][5,0]5.0.5}{[1][97][]97}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{98}{table.caption.20}\protected@file@percent }
-\newlabel{tab:experiment_2_graph_refinement}{{5.4}{98}{Experiment 2 results: effect of graph-based residual refinement}{table.caption.20}{}}
-\newlabel{tab:experiment_2_graph_refinement@cref}{{[table][4][5]5.4}{[1][98][]98}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{100}{subsection.5.0.6}\protected@file@percent }
-\newlabel{subsec:experiment_3_confidence_weighted_gnn}{{5.0.6}{100}{Experiment 3: Confidence-weighted GNN Ablation}{subsection.5.0.6}{}}
-\newlabel{subsec:experiment_3_confidence_weighted_gnn@cref}{{[subsection][6][5,0]5.0.6}{[1][100][]100}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.5}{\ignorespaces Experiment 3 results: confidence-weighted GNN ablation.}}{101}{table.caption.21}\protected@file@percent }
-\newlabel{tab:experiment_3_confidence_ablation}{{5.5}{101}{Experiment 3 results: confidence-weighted GNN ablation}{table.caption.21}{}}
-\newlabel{tab:experiment_3_confidence_ablation@cref}{{[table][5][5]5.5}{[1][101][]101}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{103}{subsection.5.0.7}\protected@file@percent }
-\newlabel{subsec:experiment_4_incremental_training}{{5.0.7}{103}{Experiment 4: Incremental Training in Rolling Forecasting}{subsection.5.0.7}{}}
-\newlabel{subsec:experiment_4_incremental_training@cref}{{[subsection][7][5,0]5.0.7}{[1][103][]103}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.6}{\ignorespaces Experiment 4 results: non-incremental training vs incremental training.}}{104}{table.caption.22}\protected@file@percent }
-\newlabel{tab:experiment_4_incremental_training}{{5.6}{104}{Experiment 4 results: non-incremental training vs incremental training}{table.caption.22}{}}
-\newlabel{tab:experiment_4_incremental_training@cref}{{[table][6][5]5.6}{[1][104][]104}{}{}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{106}{subsection.5.0.8}\protected@file@percent }
-\newlabel{subsec:summary_experimental_findings}{{5.0.8}{106}{Summary of Experimental Findings}{subsection.5.0.8}{}}
-\newlabel{subsec:summary_experimental_findings@cref}{{[subsection][8][5,0]5.0.8}{[1][106][]106}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5.7}{\ignorespaces Summary of the main experimental findings.}}{109}{table.caption.23}\protected@file@percent }
-\newlabel{tab:summary_experimental_findings}{{5.7}{109}{Summary of the main experimental findings}{table.caption.23}{}}
-\newlabel{tab:summary_experimental_findings@cref}{{[table][7][5]5.7}{[1][108][]109}{}{}{}}
-\@writefile{toc}{\contentsline {chapter}{\numberline {6}Discussion}{111}{chapter.6}\protected@file@percent }
+\newlabel{chap:experiments}{{5}{88}{Experiments}{chapter.5}{}}
+\newlabel{chap:experiments@cref}{{[chapter][5][]5}{[1][88][]88}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.1}Experimental Objectives}{88}{subsection.5.0.1}\protected@file@percent }
+\newlabel{subsec:experimental_objectives}{{5.0.1}{88}{Experimental Objectives}{subsection.5.0.1}{}}
+\newlabel{subsec:experimental_objectives@cref}{{[subsection][1][5,0]5.0.1}{[1][88][]88}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.2}Dataset and Preprocessing}{90}{subsection.5.0.2}\protected@file@percent }
+\newlabel{subsec:dataset_preprocessing}{{5.0.2}{90}{Dataset and Preprocessing}{subsection.5.0.2}{}}
+\newlabel{subsec:dataset_preprocessing@cref}{{[subsection][2][5,0]5.0.2}{[1][90][]90}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{93}{subsection.5.0.3}\protected@file@percent }
+\newlabel{subsec:evaluation_protocol_metrics}{{5.0.3}{93}{Evaluation Protocol and Metrics}{subsection.5.0.3}{}}
+\newlabel{subsec:evaluation_protocol_metrics@cref}{{[subsection][3][5,0]5.0.3}{[1][93][]93}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{96}{subsection.5.0.4}\protected@file@percent }
+\newlabel{subsec:temporal_baseline_comparison}{{5.0.4}{96}{Experiment 1: Temporal Baseline Comparison}{subsection.5.0.4}{}}
+\newlabel{subsec:temporal_baseline_comparison@cref}{{[subsection][4][5,0]5.0.4}{[1][96][]96}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{97}{table.caption.24}\protected@file@percent }
+\newlabel{tab:temporal_baseline_results}{{5.1}{97}{Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period}{table.caption.24}{}}
+\newlabel{tab:temporal_baseline_results@cref}{{[table][1][5]5.1}{[1][96][]97}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{97}{table.caption.25}\protected@file@percent }
+\newlabel{tab:temporal_baseline_improvement}{{5.2}{97}{Relative improvement of the proposed multi-scale model over temporal baselines}{table.caption.25}{}}
+\newlabel{tab:temporal_baseline_improvement@cref}{{[table][2][5]5.2}{[1][97][]97}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{99}{table.caption.26}\protected@file@percent }
+\newlabel{tab:hourly_mae_temporal_models}{{5.3}{99}{Hourly MAE comparison across the 24-hour rolling forecasting period}{table.caption.26}{}}
+\newlabel{tab:hourly_mae_temporal_models@cref}{{[table][3][5]5.3}{[1][98][]99}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{100}{subsection.5.0.5}\protected@file@percent }
+\newlabel{subsec:experiment_2_graph_refinement}{{5.0.5}{100}{Experiment 2: Effect of Graph-based Residual Refinement}{subsection.5.0.5}{}}
+\newlabel{subsec:experiment_2_graph_refinement@cref}{{[subsection][5][5,0]5.0.5}{[1][100][]100}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{101}{table.caption.27}\protected@file@percent }
+\newlabel{tab:experiment_2_graph_refinement}{{5.4}{101}{Experiment 2 results: effect of graph-based residual refinement}{table.caption.27}{}}
+\newlabel{tab:experiment_2_graph_refinement@cref}{{[table][4][5]5.4}{[1][101][]101}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{103}{subsection.5.0.6}\protected@file@percent }
+\newlabel{subsec:experiment_3_confidence_weighted_gnn}{{5.0.6}{103}{Experiment 3: Confidence-weighted GNN Ablation}{subsection.5.0.6}{}}
+\newlabel{subsec:experiment_3_confidence_weighted_gnn@cref}{{[subsection][6][5,0]5.0.6}{[1][103][]103}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.5}{\ignorespaces Experiment 3 results: confidence-weighted GNN ablation.}}{104}{table.caption.28}\protected@file@percent }
+\newlabel{tab:experiment_3_confidence_ablation}{{5.5}{104}{Experiment 3 results: confidence-weighted GNN ablation}{table.caption.28}{}}
+\newlabel{tab:experiment_3_confidence_ablation@cref}{{[table][5][5]5.5}{[1][104][]104}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{106}{subsection.5.0.7}\protected@file@percent }
+\newlabel{subsec:experiment_4_incremental_training}{{5.0.7}{106}{Experiment 4: Incremental Training in Rolling Forecasting}{subsection.5.0.7}{}}
+\newlabel{subsec:experiment_4_incremental_training@cref}{{[subsection][7][5,0]5.0.7}{[1][106][]106}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.6}{\ignorespaces Experiment 4 results: non-incremental training vs incremental training.}}{107}{table.caption.29}\protected@file@percent }
+\newlabel{tab:experiment_4_incremental_training}{{5.6}{107}{Experiment 4 results: non-incremental training vs incremental training}{table.caption.29}{}}
+\newlabel{tab:experiment_4_incremental_training@cref}{{[table][6][5]5.6}{[1][107][]107}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{109}{subsection.5.0.8}\protected@file@percent }
+\newlabel{subsec:summary_experimental_findings}{{5.0.8}{109}{Summary of Experimental Findings}{subsection.5.0.8}{}}
+\newlabel{subsec:summary_experimental_findings@cref}{{[subsection][8][5,0]5.0.8}{[1][109][]109}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5.7}{\ignorespaces Summary of the main experimental findings.}}{112}{table.caption.30}\protected@file@percent }
+\newlabel{tab:summary_experimental_findings}{{5.7}{112}{Summary of the main experimental findings}{table.caption.30}{}}
+\newlabel{tab:summary_experimental_findings@cref}{{[table][7][5]5.7}{[1][111][]112}{}{}{}}
+\@writefile{toc}{\contentsline {chapter}{\numberline {6}Discussion}{114}{chapter.6}\protected@file@percent }
 \@writefile{lof}{\addvspace {10\p@ }}
 \@writefile{lot}{\addvspace {10\p@ }}
-\@writefile{toc}{\contentsline {chapter}{\numberline {7}Conclusion}{112}{chapter.7}\protected@file@percent }
+\newlabel{sec:discussion}{{6}{114}{Discussion}{chapter.6}{}}
+\newlabel{sec:discussion@cref}{{[chapter][6][]6}{[1][114][]114}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.1}Overview of the Main Findings}{114}{subsection.6.0.1}\protected@file@percent }
+\newlabel{subsec:discussion_overview}{{6.0.1}{114}{Overview of the Main Findings}{subsection.6.0.1}{}}
+\newlabel{subsec:discussion_overview@cref}{{[subsection][1][6,0]6.0.1}{[1][114][]114}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.2}Interpretation of the Multi-scale Temporal Model}{116}{subsection.6.0.2}\protected@file@percent }
+\newlabel{subsec:discussion_temporal_model}{{6.0.2}{116}{Interpretation of the Multi-scale Temporal Model}{subsection.6.0.2}{}}
+\newlabel{subsec:discussion_temporal_model@cref}{{[subsection][2][6,0]6.0.2}{[1][116][]116}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.3}Interpretation of Graph-based Residual Refinement}{119}{subsection.6.0.3}\protected@file@percent }
+\newlabel{subsec:discussion_graph_refinement}{{6.0.3}{119}{Interpretation of Graph-based Residual Refinement}{subsection.6.0.3}{}}
+\newlabel{subsec:discussion_graph_refinement@cref}{{[subsection][3][6,0]6.0.3}{[1][119][]119}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.4}Interpretation of Confidence Weighting}{121}{subsection.6.0.4}\protected@file@percent }
+\newlabel{subsec:discussion_confidence_weighting}{{6.0.4}{121}{Interpretation of Confidence Weighting}{subsection.6.0.4}{}}
+\newlabel{subsec:discussion_confidence_weighting@cref}{{[subsection][4][6,0]6.0.4}{[1][121][]121}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.5}Interpretation of Incremental Training}{124}{subsection.6.0.5}\protected@file@percent }
+\newlabel{subsec:discussion_incremental_training}{{6.0.5}{124}{Interpretation of Incremental Training}{subsection.6.0.5}{}}
+\newlabel{subsec:discussion_incremental_training@cref}{{[subsection][5][6,0]6.0.5}{[1][124][]124}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.6}Practical Implications}{126}{subsection.6.0.6}\protected@file@percent }
+\newlabel{subsec:discussion_practical_implications}{{6.0.6}{126}{Practical Implications}{subsection.6.0.6}{}}
+\newlabel{subsec:discussion_practical_implications@cref}{{[subsection][6][6,0]6.0.6}{[1][126][]126}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.7}Limitations}{128}{subsection.6.0.7}\protected@file@percent }
+\newlabel{subsec:discussion_limitations}{{6.0.7}{128}{Limitations}{subsection.6.0.7}{}}
+\newlabel{subsec:discussion_limitations@cref}{{[subsection][7][6,0]6.0.7}{[1][127][]128}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.8}Future Work}{130}{subsection.6.0.8}\protected@file@percent }
+\newlabel{subsec:discussion_future_work}{{6.0.8}{130}{Future Work}{subsection.6.0.8}{}}
+\newlabel{subsec:discussion_future_work@cref}{{[subsection][8][6,0]6.0.8}{[1][129][]130}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.0.9}Concluding Discussion}{131}{subsection.6.0.9}\protected@file@percent }
+\newlabel{subsec:discussion_concluding}{{6.0.9}{131}{Concluding Discussion}{subsection.6.0.9}{}}
+\newlabel{subsec:discussion_concluding@cref}{{[subsection][9][6,0]6.0.9}{[1][131][]131}{}{}{}}
+\@writefile{toc}{\contentsline {chapter}{\numberline {7}Conclusion}{133}{chapter.7}\protected@file@percent }
 \@writefile{lof}{\addvspace {10\p@ }}
 \@writefile{lot}{\addvspace {10\p@ }}
-\@writefile{toc}{\contentsline {chapter}{\numberline {A}Additional Materials}{113}{appendix.A}\protected@file@percent }
+\newlabel{sec:conclusion}{{7}{133}{Conclusion}{chapter.7}{}}
+\newlabel{sec:conclusion@cref}{{[chapter][7][]7}{[1][133][]133}{}{}{}}
+\@writefile{toc}{\contentsline {chapter}{\numberline {A}Additional Materials}{138}{appendix.A}\protected@file@percent }
 \@writefile{lof}{\addvspace {10\p@ }}
 \@writefile{lot}{\addvspace {10\p@ }}
 \abx@aux@read@bbl@mdfivesum{C31EBB8BD8768D613ADB7A68C9471B99}
@@ -850,4 +902,4 @@
 \abx@aux@defaultrefcontext{0}{cavalcante2024review}{none/global//global/global/global}
 \abx@aux@defaultrefcontext{0}{lu2023incremental}{none/global//global/global/global}
 \abx@aux@defaultrefcontext{0}{vaswani2017attention}{none/global//global/global/global}
-\gdef \@abspage@last{129}
+\gdef \@abspage@last{154}
