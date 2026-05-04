@@ -21,6 +21,11 @@
 \contentsline {figure}{\numberline {4.7}{\ignorespaces Rolling execution loop for hourly taxi-demand prediction, uncertainty estimation, confidence assignment, GraphSAGE refinement, and final metric aggregation.}}{79}{figure.caption.22}%
 \contentsline {figure}{\numberline {4.8}{\ignorespaces Comparison between the persistent and incremental temporal managers, showing how stale checkpoints are either reused with a warning or updated through lightweight incremental training before prediction.}}{82}{figure.caption.23}%
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {5.1}{\ignorespaces Hourly MAE comparison of temporal-only baselines across the 24-hour rolling forecasting period, showing that the proposed multi-scale model achieves lower error than LSTM, GRU, and Transformer models for most target hours.}}{97}{figure.caption.25}%
+\contentsline {figure}{\numberline {5.2}{\ignorespaces Effect of GraphSAGE-based residual refinement on multi-scale temporal predictions, comparing the temporal-only model with graph-refined variants with and without historical mean features.}}{102}{figure.caption.29}%
+\contentsline {figure}{\numberline {5.3}{\ignorespaces Confidence-weighted GNN ablation results, comparing unweighted graph refinement with prior-only, stability-only, neighbourhood-only, and full confidence weighting strategies.}}{106}{figure.caption.31}%
+\contentsline {figure}{\numberline {5.4}{\ignorespaces Effect of incremental training on rolling forecasting performance, comparing non-incremental checkpoint reuse with incremental updating for both the base temporal model and the GNN-refined model.}}{109}{figure.caption.33}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {7.1}{\ignorespaces Stage-wise structure of the proposed rolling taxi-demand forecasting framework, progressing from multi-scale temporal prediction to GraphSAGE residual refinement, confidence-weighted learning, and incremental rolling adaptation.}}{138}{figure.caption.35}%
 \addvspace {10\p@ }

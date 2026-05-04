@@ -98,18 +98,18 @@
 \contentsline {subsection}{\numberline {5.0.3}Evaluation Protocol and Metrics}{93}{subsection.5.0.3}%
 \contentsline {subsection}{\numberline {5.0.4}Experiment 1: Temporal Baseline Comparison}{96}{subsection.5.0.4}%
 \contentsline {subsection}{\numberline {5.0.5}Experiment 2: Effect of Graph-based Residual Refinement}{100}{subsection.5.0.5}%
-\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{103}{subsection.5.0.6}%
-\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{106}{subsection.5.0.7}%
-\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{109}{subsection.5.0.8}%
-\contentsline {chapter}{\numberline {6}Discussion}{114}{chapter.6}%
-\contentsline {subsection}{\numberline {6.0.1}Overview of the Main Findings}{114}{subsection.6.0.1}%
-\contentsline {subsection}{\numberline {6.0.2}Interpretation of the Multi-scale Temporal Model}{116}{subsection.6.0.2}%
-\contentsline {subsection}{\numberline {6.0.3}Interpretation of Graph-based Residual Refinement}{119}{subsection.6.0.3}%
-\contentsline {subsection}{\numberline {6.0.4}Interpretation of Confidence Weighting}{121}{subsection.6.0.4}%
-\contentsline {subsection}{\numberline {6.0.5}Interpretation of Incremental Training}{124}{subsection.6.0.5}%
-\contentsline {subsection}{\numberline {6.0.6}Practical Implications}{126}{subsection.6.0.6}%
-\contentsline {subsection}{\numberline {6.0.7}Limitations}{128}{subsection.6.0.7}%
-\contentsline {subsection}{\numberline {6.0.8}Future Work}{130}{subsection.6.0.8}%
-\contentsline {subsection}{\numberline {6.0.9}Concluding Discussion}{131}{subsection.6.0.9}%
-\contentsline {chapter}{\numberline {7}Conclusion}{133}{chapter.7}%
-\contentsline {chapter}{\numberline {A}Additional Materials}{138}{appendix.A}%
+\contentsline {subsection}{\numberline {5.0.6}Experiment 3: Confidence-weighted GNN Ablation}{104}{subsection.5.0.6}%
+\contentsline {subsection}{\numberline {5.0.7}Experiment 4: Incremental Training in Rolling Forecasting}{108}{subsection.5.0.7}%
+\contentsline {subsection}{\numberline {5.0.8}Summary of Experimental Findings}{111}{subsection.5.0.8}%
+\contentsline {chapter}{\numberline {6}Discussion}{116}{chapter.6}%
+\contentsline {subsection}{\numberline {6.0.1}Overview of the Main Findings}{116}{subsection.6.0.1}%
+\contentsline {subsection}{\numberline {6.0.2}Interpretation of the Multi-scale Temporal Model}{118}{subsection.6.0.2}%
+\contentsline {subsection}{\numberline {6.0.3}Interpretation of Graph-based Residual Refinement}{121}{subsection.6.0.3}%
+\contentsline {subsection}{\numberline {6.0.4}Interpretation of Confidence Weighting}{123}{subsection.6.0.4}%
+\contentsline {subsection}{\numberline {6.0.5}Interpretation of Incremental Training}{126}{subsection.6.0.5}%
+\contentsline {subsection}{\numberline {6.0.6}Practical Implications}{128}{subsection.6.0.6}%
+\contentsline {subsection}{\numberline {6.0.7}Limitations}{130}{subsection.6.0.7}%
+\contentsline {subsection}{\numberline {6.0.8}Future Work}{132}{subsection.6.0.8}%
+\contentsline {subsection}{\numberline {6.0.9}Concluding Discussion}{133}{subsection.6.0.9}%
+\contentsline {chapter}{\numberline {7}Conclusion}{135}{chapter.7}%
+\contentsline {chapter}{\numberline {A}Additional Materials}{141}{appendix.A}%

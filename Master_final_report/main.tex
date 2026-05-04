@@ -1563,6 +1563,14 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Among the three single temporal baselines, the Transformer performs best, with an overall MAE of 23.05 and RMSE of 38.39. This suggests that attention-based temporal modelling is more effective than the recurrent LSTM and GRU baselines for this rolling forecasting period. However, the proposed multi-scale model still outperforms the Transformer by a clear margin. Compared with the Transformer, the multi-scale model reduces MAE by 5.40 absolute points and RMSE by 6.25 absolute points. In percentage terms, this is equivalent to a 23.4\% reduction in MAE, a 16.3\% reduction in RMSE, and a 29.9\% reduction in MSE.
 	
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/5.1.png}
+		\caption{Hourly MAE comparison of temporal-only baselines across the 24-hour rolling forecasting period, showing that the proposed multi-scale model achieves lower error than LSTM, GRU, and Transformer models for most target hours.}
+		\label{fig:5.1}
+	\end{figure}
+	
 	The improvement over LSTM and GRU is larger. The LSTM baseline obtains an overall MAE of 26.66, while the GRU baseline obtains an overall MAE of 27.35. The proposed multi-scale model reduces MAE by 9.01 compared with LSTM and by 9.70 compared with GRU. This result indicates that a single recurrent architecture is not sufficient to capture the full temporal structure of taxi demand in this setting. Although LSTM and GRU can model sequential dependency, they are less effective at representing demand patterns that occur simultaneously at different temporal scales.
 	
 	\begin{table}[htbp]
@@ -1658,20 +1666,37 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The experiment is conducted over 24 rolling target hours from \texttt{2021-03-05 00:00:00} to \texttt{2021-03-05 23:00:00}. For each target hour, 258 valid taxi-zone nodes are used. The graph data are split into 155 training nodes, 52 validation nodes, and 51 test nodes. The reported summary metrics are calculated over the rolling test predictions.
 	
-	\begin{table}[H]
-		\centering
-		\caption{Experiment 2 results: effect of graph-based residual refinement.}
-		\label{tab:experiment_2_graph_refinement}
-		\begin{tabular}{lrrrr}
+\begin{table}[H]
+	\centering
+	\caption{Experiment 2 results: effect of graph-based residual refinement.}
+	\label{tab:experiment_2_graph_refinement}
+	\resizebox{\textwidth}{!}{%
+		\begin{tabular}{@{}lrrrr@{}}
 			\toprule
-			\textbf{Model} & \textbf{MAE $\downarrow$} & \textbf{RMSE $\downarrow$} & \textbf{MSE $\downarrow$} & \textbf{MAE Improvement} \\
+			\textbf{Model} 
+			& \textbf{MAE $\downarrow$} 
+			& \textbf{RMSE $\downarrow$} 
+			& \textbf{MSE $\downarrow$} 
+			& \textbf{MAE Impr.} \\
 			\midrule
-			T4: Multi-scale Temporal & 33.4804 & 51.9800 & 2701.9194 & -- \\
-			G1: Multi-scale + GNN & 16.2106 & 30.5118 & 930.9674 & 51.58\% \\
-			G2: Multi-scale + GNN + History Features & 16.2040 & 30.3489 & 921.0562 & 51.60\% \\
+			T4: Multi-scale Temporal 
+			& 33.4804 & 51.9800 & 2701.9194 & -- \\
+			G1: Multi-scale + GNN 
+			& 16.2106 & 30.5118 & 930.9674 & 51.58\% \\
+			G2: Multi-scale + GNN + History Features 
+			& 16.2040 & 30.3489 & 921.0562 & 51.60\% \\
 			\bottomrule
-		\end{tabular}
-	\end{table}
+		\end{tabular}%
+	}
+\end{table}
+	
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/5.2.png}
+		\caption{Effect of GraphSAGE-based residual refinement on multi-scale temporal predictions, comparing the temporal-only model with graph-refined variants with and without historical mean features.}
+		\label{fig:5.2}
+	\end{figure}
 	
 	The results show that graph-based residual refinement leads to a substantial improvement over the temporal-only model. Compared with T4, G1 reduces MAE from 33.4804 to 16.2106, corresponding to a 51.58\% reduction in absolute error. RMSE is also reduced from 51.9800 to 30.5118, while MSE decreases from 2701.9194 to 930.9674. This indicates that the temporal-only model still contains systematic zone-level errors that can be corrected by using spatial information from the taxi-zone graph.
 	
@@ -1729,6 +1754,14 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The results show that confidence weighting produces a moderate but meaningful effect on the GNN refinement stage. Compared with the unweighted GNN, the stability-only model achieves the best overall prediction accuracy. Its MAE decreases from 16.6460 to 16.4645, corresponding to an improvement of approximately 1.09\%. RMSE also decreases from 29.2035 to 28.9847, and MSE decreases from 852.8439 to 840.1146. This indicates that the MC Dropout stability score is the most effective individual confidence component for reducing average prediction error.
 	
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/5.3.png}
+		\caption{Confidence-weighted GNN ablation results, comparing unweighted graph refinement with prior-only, stability-only, neighbourhood-only, and full confidence weighting strategies.}
+		\label{fig:5.3}
+	\end{figure}
+	
 	This result is consistent with the purpose of MC Dropout uncertainty estimation. A zone prediction with lower MC Dropout variance is more stable under stochastic forward passes, suggesting that the base temporal model is more confident about that prediction. When this stability score is used as a GNN sample weight, the residual refinement model gives more importance to reliable nodes and reduces the influence of uncertain predictions. Therefore, the stability-only result suggests that uncertainty-aware weighting can improve the learning of residual corrections.
 	
 	The prior-only setting does not improve MAE. Its MAE increases slightly from 16.6460 to 16.7136. This suggests that historical data sufficiency alone is not a sufficient indicator of prediction reliability. A zone with more historical records may still exhibit strong short-term volatility, and high-demand zones can still produce large forecasting errors. However, the prior-only model slightly improves RMSE, MSE, and the standard deviation of hourly MAE. This means that the prior score may help reduce some large-error fluctuations, but it is not strong enough to improve the average absolute error by itself.
@@ -1777,7 +1810,7 @@ Although the current design still leaves room for stronger graph validation, exp
 		\label{tab:experiment_4_incremental_training}
 		\begin{tabular}{llrrrr}
 			\toprule
-			\textbf{Model} & \textbf{Training Mode} & \textbf{MAE $\downarrow$} & \textbf{RMSE $\downarrow$} & \textbf{MSE $\downarrow$} & \textbf{Std. of Hourly MAE $\downarrow$} \\
+			\textbf{Model} & \textbf{Training Mode} & \textbf{MAE $\downarrow$} & \textbf{RMSE $\downarrow$} & \textbf{MSE $\downarrow$} & \textbf{Std.MAE $\downarrow$} \\
 			\midrule
 			Base Temporal & Non-incremental & 34.9008 & 54.2014 & 2937.7899 & 12.6363 \\
 			Base Temporal & Incremental & 26.3093 & 40.5043 & 1640.5947 & 10.2752 \\
@@ -1787,6 +1820,15 @@ Although the current design still leaves room for stronger graph validation, exp
 			\bottomrule
 		\end{tabular}
 	\end{table}
+	
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/5.4.png}
+		\caption{Effect of incremental training on rolling forecasting performance, comparing non-incremental checkpoint reuse with incremental updating for both the base temporal model and the GNN-refined model.}
+		\label{fig:5.4}
+	\end{figure}
+	
 	
 	The results show that incremental training improves both the base temporal model and the final GNN-refined model. For the temporal-only prediction, MAE decreases from 34.9008 under non-incremental checkpoint reuse to 26.3093 under incremental training. This corresponds to a relative MAE reduction of approximately 24.62\%. RMSE is also reduced from 54.2014 to 40.5043, giving a relative reduction of approximately 25.27\%. This indicates that incremental updating allows the temporal model to adapt more effectively to the newly available demand patterns during the rolling process.
 	
@@ -2060,15 +2102,15 @@ Although the current design still leaves room for stronger graph validation, exp
 	Experiment 4 evaluated incremental training in the rolling forecasting setting. The results showed that incremental updating improves both the base temporal model and the final graph-refined model. For the temporal-only prediction, incremental training reduced MAE from 34.9008 to 26.3093. After graph refinement, incremental training reduced MAE from 14.7466 to 13.0842 and reduced RMSE from 30.3834 to 24.8755. It also improved rolling stability, reducing the standard deviation of hourly MAE for the GNN-refined model from 7.7932 to 5.7611. These results confirm that rolling demand forecasting benefits from updating the model as new data arrive. A static checkpoint can become less representative as the forecast origin moves forward, while incremental updating allows the model to adapt to recent demand changes. This makes incremental training particularly important for practical deployment scenarios where demand patterns evolve continuously.
 	
 	Overall, the experiments demonstrate that each part of the proposed framework contributes differently. The multi-scale temporal model provides the base prediction and captures within-zone temporal structure. The graph refinement model provides the largest improvement in predictive accuracy by correcting spatially structured residual errors. The confidence module improves the reliability of the graph refinement process by weighting nodes according to their estimated trustworthiness. Incremental training improves adaptation and reduces instability during rolling forecasting. The final system should therefore be understood as a modular forecasting pipeline rather than a single monolithic model:
-	\[
-	\text{Multi-scale Temporal Prediction}
-	\rightarrow
-	\text{GraphSAGE Residual Refinement}
-	\rightarrow
-	\text{Confidence-weighted Learning}
-	\rightarrow
-	\text{Incremental Rolling Adaptation}.
-	\]
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=1\textwidth]{img/7.1.png}
+		\caption{Stage-wise structure of the proposed rolling taxi-demand forecasting framework, progressing from multi-scale temporal prediction to GraphSAGE residual refinement, confidence-weighted learning, and incremental rolling adaptation.}
+		\label{fig:7.1}
+	\end{figure}
+	
+	
 	This modular structure is one of the main strengths of the work. It allows each component to be analysed, improved, and replaced independently. For example, the temporal backbone could be changed without redesigning the graph refinement module, and the GraphSAGE component could be replaced by another graph neural network architecture in future work.
 	
 	The thesis makes several contributions. First, it proposes a two-stage forecasting architecture for taxi-zone demand prediction, where a multi-scale temporal model is followed by graph-based residual correction. This design combines the strengths of temporal sequence modelling and graph neural networks while keeping their responsibilities clearly separated. Second, it demonstrates that residual learning on a taxi-zone graph can substantially improve temporal-only predictions. Third, it introduces a confidence-weighted graph refinement strategy based on historical sufficiency, MC Dropout stability, and neighbourhood consistency. Fourth, it evaluates incremental training as a practical mechanism for improving rolling forecasting stability. Together, these contributions show that short-term taxi demand forecasting can benefit from combining temporal modelling, spatial correction, uncertainty-aware weighting, and online adaptation.
