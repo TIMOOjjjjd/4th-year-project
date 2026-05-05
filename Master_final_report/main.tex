@@ -133,7 +133,7 @@
 			for the degree of Master of Science by Research\par}
 		
 		\vspace{1cm}
-		{\large 04 2026\par}
+		{\large April 2026\par}
 	\end{titlepage}
 	
 	% ---------------------------
@@ -142,7 +142,7 @@
 	\pagenumbering{roman}
 	
 	\chapter*{Abstract}
-	Accurate urban taxi demand forecasting is essential for intelligent transportation management, fleet dispatching, and congestion mitigation. However, this task remains challenging because demand patterns exhibit strong temporal non-stationarity, multi-scale periodicity, and complex spatial dependency across city regions. To address these issues, this study proposes a two-stage framework for hourly taxi demand prediction over New York City Taxi Zones, integrating multi-scale temporal modeling, uncertainty estimation, and graph-based spatial refinement. In the first stage, a persistent per-zone forecasting model is developed to capture temporal dynamics at four different scales: hourly, daily, weekly, and monthly. The architecture combines GRU, LSTM, and Transformer components to learn short-term fluctuations and long-range temporal regularities within a unified multi-branch design. Monte Carlo Dropout is further employed to estimate predictive uncertainty for each zone. In the second stage, the base predictions are treated as priors and refined through a GraphSAGE-based residual learning module constructed on an origin-destination flow graph. To improve robustness, a confidence-weighting mechanism is introduced by combining historical sufficiency, model stability, and neighborhood consistency, allowing unreliable zones to contribute less during graph refinement. The overall system is evaluated under a rolling forecasting protocol that simulates real-world hourly prediction updates. Experimental results indicate that the proposed graph refinement stage reduces prediction error relative to the temporal baseline and is especially beneficial for zones with sparse history or high predictive variance. In addition, the proposed method improves spatial coherence among neighboring zones and provides a more stable forecasting process under dynamic urban conditions. Overall, the framework demonstrates that combining multi-scale sequence learning with confidence-aware graph neural refinement offers an effective, robust, and extensible solution for spatiotemporal urban taxi demand forecasting problems.
+	Accurate urban taxi demand forecasting is essential for intelligent transportation management, fleet dispatching, and congestion mitigation. However, this task remains challenging because demand patterns exhibit strong temporal non-stationarity, multi-scale periodicity, and complex spatial dependency across city regions. To address these issues, this study proposes a two-stage framework for hourly taxi demand prediction over New York City Taxi Zones, integrating multi-scale temporal modeling, uncertainty estimation, and graph-based residual refinement. In the first stage, a persistent per-zone forecasting model is developed to capture temporal dynamics at four different scales: hourly, daily, weekly, and monthly. The architecture combines GRU, LSTM, and Transformer components to learn short-term fluctuations and long-range temporal regularities within a unified multi-branch design. Monte Carlo Dropout is further employed to estimate predictive uncertainty for each zone. In the second stage, the base predictions are treated as priors and refined through a GraphSAGE-based residual learning module constructed on an origin-destination flow graph. As an auxiliary robustness mechanism, confidence weighting is explored by combining historical sufficiency, model stability, and neighbourhood consistency, so that less reliable zones have a reduced influence during graph refinement. The overall system is evaluated under a rolling forecasting protocol that simulates real-world hourly prediction updates. Experimental results indicate that the proposed graph refinement stage reduces prediction error relative to the temporal baseline, with the main performance gain coming from GraphSAGE-based residual correction. Confidence weighting provides a more limited but useful robustness-oriented adjustment, particularly under unstable or sparse-data conditions. Overall, the framework demonstrates that combining multi-scale sequence learning with graph-based residual refinement offers an effective and extensible solution for spatiotemporal urban taxi demand forecasting problems.
 	
 	\chapter*{Acknowledgements}
 	First of all, I would like to express my sincere gratitude to my Dissertation supervisor,     
@@ -179,7 +179,7 @@ Beyond technical performance, this problem also has wider urban significance. Mo
 
 \section{Problem Definition and Research Challenges}
 
-Recent research on traffic and mobility prediction has increasingly moved toward spatiotemporal architectures that combine temporal sequence modelling with graph-based spatial learning.\cite{8903252} Temporal models such as recurrent neural networks and transformer variants are effective for extracting sequential dependencies\cite{info15090517,rnn_evolution_2024}, whereas graph neural networks offer a principled way to propagate information across related regions\cite{9046288}. Yet the The integration of these components is not straightforward. End-to-end spatiotemporal models can be highly effective for traffic forecasting because they jointly model spatial and temporal dependencies, and representative architectures such as DCRNN and Graph WaveNet have achieved strong results in this setting \cite{li2018dcrnn,jiang2022survey}. However, such graph-based deep models are often difficult to interpret, which limits their transparency in operational use \cite{garcia2023explainability}. In practical city-scale forecasting, there is therefore value in separating the problem into an initial temporal prediction stage and a subsequent spatial correction stage. This type of decoupled design is also supported by recent work showing that different latent traffic signals can be handled more effectively when spatial diffusion and inherent temporal components are modelled separately \cite{shao2022d2stgnn}. Such a design allows the first component to focus on modelling zone-specific temporal regularity while the second component exploits graph structure to refine predictions in a more modular and controlled manner.
+Recent research on traffic and mobility prediction has increasingly moved toward spatiotemporal architectures that combine temporal sequence modelling with graph-based spatial learning.\cite{8903252} Temporal models such as recurrent neural networks and transformer variants are effective for extracting sequential dependencies\cite{info15090517,rnn_evolution_2024}, whereas graph neural networks offer a principled way to propagate information across related regions\cite{9046288}. Yet the integration of these components is not straightforward. End-to-end spatiotemporal models can be highly effective for traffic forecasting because they jointly model spatial and temporal dependencies, and representative architectures such as DCRNN and Graph WaveNet have achieved strong results in this setting \cite{li2018dcrnn,jiang2022survey}. However, such graph-based deep models are often difficult to interpret, which limits their transparency in operational use \cite{garcia2023explainability}. In practical city-scale forecasting, there is therefore value in separating the problem into an initial temporal prediction stage and a subsequent spatial correction stage. This type of decoupled design is also supported by recent work showing that different latent traffic signals can be handled more effectively when spatial diffusion and inherent temporal components are modelled separately \cite{shao2022d2stgnn}. Such a design allows the first component to focus on modelling zone-specific temporal regularity while the second component exploits graph structure to refine predictions in a more modular and controlled manner.
 
 Another important issue is uncertainty. Most prediction systems output a single point estimate, but for urban demand forecasting this is frequently insufficient, since recent studies have shown that spatiotemporal travel demand prediction should explicitly quantify predictive uncertainty rather than rely only on deterministic outputs \cite{zhuang2022sparse,wang2024probgnn}. Prediction reliability varies significantly across time and across regions. A confident prediction in a historically dense, stable zone should not be treated in the same way as a volatile estimate produced for a sparse zone with weak historical support \cite{zhuang2022sparse}. If uncertainty can be quantified explicitly, it can be used to guide later stages of the model and to reduce the influence of unreliable nodes during learning. Therefore, uncertainty is not merely an auxiliary diagnostic quantity; it can also serve as a useful signal for weighting, calibration, and robustness enhancement.
 
@@ -226,9 +226,13 @@ Against this background, the aim of this thesis is to investigate whether a two-
 More specifically, this thesis addresses the following research questions:
 
 \begin{enumerate}
-	\item Can a per-zone multi-scale recurrent architecture provide robust next-hour predictions across heterogeneous Taxi Zones?
-	\item Can uncertainty-derived confidence scores improve the stability of spatial refinement by weighting graph learning according to node reliability?
-	\item Does a GraphSAGE residual correction stage produce more accurate and spatially coherent forecasts than the temporal baseline alone under a rolling evaluation setting?
+	\item Can a per-zone multi-scale temporal architecture provide a strong and robust baseline for next-hour taxi demand prediction across heterogeneous Taxi Zones?
+	
+	\item Does GraphSAGE-based residual refinement improve prediction accuracy compared with the temporal baseline alone under a rolling evaluation setting?
+	
+	\item Can uncertainty-derived confidence weighting improve the robustness and stability of graph-based spatial refinement by adjusting node contributions according to reliability?
+	
+	\item Does incremental training improve rolling forecasting performance for both the temporal baseline and the graph-refined model?
 \end{enumerate}
 
 \section{Contributions of This Thesis}
@@ -236,17 +240,20 @@ More specifically, this thesis addresses the following research questions:
 Accordingly, the main contributions of this work can be summarised as follows:
 
 \begin{enumerate}
-	\item It develops a multi-scale temporal forecasting framework for hourly Taxi Zone demand that combines GRU, LSTM, and Transformer components across four temporal horizons.
-	\item It incorporates Monte Carlo Dropout-based uncertainty estimation into a broader confidence fusion mechanism that also accounts for historical sufficiency and neighbourhood consistency.
-	\item It introduces a GraphSAGE-based residual refinement stage over an origin-destination flow graph to correct temporal predictions using spatial structure.
-	\item It implements the whole method within a rolling prediction pipeline with persistent checkpoint reuse as the default setting, while also supporting an incremental update variant for improved rolling-stage stability.
+	\item It develops a multi-scale temporal forecasting framework for hourly Taxi Zone demand by combining GRU, LSTM, and Transformer components across hourly, daily, weekly, and monthly temporal horizons. This provides the temporal backbone evaluated in Experiment 1.
+	
+	\item It introduces a GraphSAGE-based residual refinement stage over an origin-destination flow graph, where temporal predictions are treated as initial estimates and corrected using structured inter-zone mobility relations. This corresponds to the graph refinement evaluation in Experiment 2.
+	
+	\item It incorporates confidence-aware weighting into the graph refinement process by considering model stability, historical sufficiency, and neighbourhood-based consistency. This design is evaluated through the confidence ablation study in Experiment 3.
+	
+	\item It implements the full method within a rolling forecasting pipeline with persistent checkpoint reuse, and further supports an incremental training variant to improve rolling-stage prediction stability. This corresponds to the rolling incremental training evaluation in Experiment 4.
 \end{enumerate}
 
 Together, these components form a practical and extensible foundation for urban demand forecasting in settings where temporal complexity, spatial coupling, and uncertainty must all be considered simultaneously.
 
 \section{Thesis Structure}
 
-The remainder of this thesis is organised as follows. Chapter~2 reviews related work on urban demand forecasting, multi-scale temporal sequence modelling, graph neural networks, and uncertainty-aware prediction. Chapter~3 formalises the problem setting and presents the proposed two-stage framework in detail, including temporal architecture, confidence construction, graph refinement, and rolling inference logic. Chapter~4 describes the implementation pipeline, data preparation process, key classes, and engineering decisions reflected in the codebase. Chapter~5 evaluates the temporal baseline and graph-refined model under rolling forecasting conditions and discusses performance patterns. Finally, Chapter~6 concludes the thesis with a discussion of strengths, limitations, and future directions, including better generalisation protocols, explicit edge-weight usage, and more systematic evaluation of the incremental online adaptation mechanism already provided by the repository.
+The remainder of this thesis is organised as follows. Chapter~2 reviews related work on urban demand forecasting, multi-scale temporal sequence modelling, graph neural networks, and uncertainty-aware prediction. Chapter~3 formalises the problem setting and presents the proposed two-stage framework in detail, including temporal architecture, confidence construction, graph refinement, and rolling inference logic. Chapter~4 describes the implementation pipeline, data preparation process, key classes, and engineering decisions reflected in the codebase. Chapter~5 evaluates the temporal baseline and graph-refined model under rolling forecasting conditions and discusses performance patterns. Chapter~6 discusses the main findings, limitations, and future work. Finally, Chapter~7 concludes the thesis.
 	
 	\chapter{Literature Review}
 \section{Introduction to the Literature Context}
@@ -974,7 +981,7 @@ The confidence mechanism does not suppress uncertain zones entirely, because unc
 
 \subsection{Motivation for Spatial Refinement}
 
-The temporal stage models each zone independently. This is valuable for local specialisation, but it leaves an important weakness unresolved: independent temporal models do not explicitly enforce spatial coherence. In a mobility system, zones interact through travel flows, commuting patterns, and network effects. If one zone experiences a surge while its strongly connected neighbours do not, the discrepancy may indicate either a true local anomaly or an error in the temporal estimate \cite{jiang2022survey,ke2021od}. The graph stage is introduced precisely to handle this kind of structured interaction.
+The temporal stage models each zone independently. This is valuable for local specialisation, but it leaves an important weakness unresolved: independent temporal models do not explicitly account for structured interactions between zones. In a mobility system, zones interact through travel flows, commuting patterns, and network effects. If one zone experiences a surge while its strongly connected neighbours do not, the discrepancy may indicate either a true local anomaly or an error in the temporal estimate \cite{jiang2022survey,ke2021od}. The graph stage is introduced precisely to handle this kind of structured interaction.
 
 
 \begin{figure}[h]
@@ -985,6 +992,15 @@ The temporal stage models each zone independently. This is valuable for local sp
 \end{figure}
 
 Rather than building a graph model that predicts demand directly from node features alone, the methodology adopts a residual refinement strategy. The baseline temporal predictions are treated as strong priors, and the graph network learns how much these priors should be adjusted in light of spatial context. This makes the graph stage a corrective mechanism rather than a replacement predictor \cite{shao2022d2stgnn}.
+
+
+\subsection{Graph Construction from OD Flow Connectivity}
+
+The graph used in the refinement stage is constructed from the origin--destination flow matrix. In this thesis, OD flow is used to determine the connectivity between taxi zones: two zones are connected if the flow relationship between them satisfies the predefined adjacency criterion. Therefore, the OD matrix provides the structural neighbourhood over which GraphSAGE performs aggregation.
+
+Importantly, the current implementation does not use OD flow magnitude as an edge weight inside the GraphSAGE message-passing operation. The standard \texttt{SAGEConv} layer aggregates information from neighbouring nodes according to the graph connectivity, but the neighbour messages are not multiplied by the corresponding OD flow values. As a result, the graph should be interpreted as an OD-flow-derived connectivity graph rather than a fully weighted OD-flow graph.
+
+This design means that OD information contributes to the model by defining which zones are considered structurally related, while the strength of each OD relationship is not explicitly used during weighted message aggregation. Incorporating OD magnitudes directly into the aggregation operator is therefore treated as a possible future extension.
 
 \subsection{Node Features}
 
@@ -1019,7 +1035,8 @@ The residual strategy stabilises graph learning because the graph model only nee
 
 \subsection{GraphSAGE Architecture}
 
-The graph refinement network is a two-layer GraphSAGE model with mean aggregation. Let \(\mathbf{h}\_i^{(0)} = \mathbf{x}^{\text{graph}}\_i\) be the initial node feature vector. At each GraphSAGE layer, the node update takes the general form
+The graph refinement network is a two-layer GraphSAGE model with mean aggregation. Let \(\mathbf{h}\_i^{(0)} = \mathbf{x}^{\text{graph}}\_i\) be the initial node feature vector.
+The aggregation is performed over the OD-flow-derived neighbourhood set. In the current implementation, this neighbourhood is treated as an unweighted connectivity structure: OD flow magnitudes determine the existence of graph edges, but they are not used as multiplicative edge weights in the mean aggregation. At each GraphSAGE layer, the node update takes the general form
 \[
 \mathbf{h}\_i^{(\ell+1)}
 =
@@ -1383,7 +1400,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	\section{Implementation-Level Limitations}
 	
-	Several implementation-level limitations should be stated openly. First, the default graph stage trains and evaluates on the same hourly graph snapshot. The graph pipeline constructs residual labels from the current target-hour true values, trains the GraphSAGE model for that hour, and then evaluates refined predictions on the same node set. This is useful for measuring the ability of the graph module to fit residual structure in the current graph snapshot, but it is not a strict temporally separated graph-generalisation protocol. The implementation itself makes this visible because each call to \texttt{run\_gnn\_pipeline()} performs graph construction, training, evaluation, metric computation, and output generation within one target-hour call.
+	Several implementation-level limitations should be stated openly. First, the default graph stage trains and evaluates on the same hourly graph snapshot. The graph pipeline constructs residual labels from the current target-hour true values, trains the GraphSAGE model for that hour, and then evaluates refined predictions on the same node set. This is useful for measuring the ability of the graph module to fit residual structure in the current graph snapshot, but it is not a strict temporally separated graph-generalisation protocol. The implementation itself makes this visible because each call to \texttt{run\_gnn\_pipeline()} performs graph construction, training, evaluation, metric computation, and output generation within one target-hour call.Although the graph data object may contain an \texttt{edge\_weight} field derived from OD flow or confidence-related quantities, this field is not consumed by the current \texttt{SAGEConv} implementation. The active GraphSAGE model uses \texttt{edge\_index} to define message-passing connectivity, but it does not perform weighted aggregation based on OD flow magnitude. Therefore, in the reported experiments, OD flow affects the graph topology but not the numerical strength of neighbour aggregation.
 	
 	Second, although the graph pipeline constructs a confidence-derived \texttt{edge\_weight} field when \texttt{zone\_confidence} is available, the defined \texttt{MultiScaleGraphSAGE} class uses standard \texttt{SAGEConv} calls that only consume node features and \texttt{edge\_index}. Thus, confidence affects graph training through node-level loss weighting, but the current message-passing operator does not explicitly use confidence or OD magnitude as an edge weight.
 	
@@ -1400,7 +1417,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	\chapter{Experiments}
 	\label{chap:experiments}
 	
-	\subsection{Experimental Objectives}
+	\section{Experimental Objectives}
 	\label{subsec:experimental_objectives}
 	
 	The purpose of the experimental study is to evaluate whether the proposed forecasting framework improves hourly taxi demand prediction through three progressive design choices: multi-scale temporal modelling, graph-based spatial refinement, and incremental adaptation under a rolling forecasting protocol. Rather than treating the proposed system as a single indivisible model, the experiments are organised as a staged evaluation. This allows each component to be tested independently before the complete pipeline is assessed.
@@ -1424,7 +1441,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	These research questions define a progressive experimental path from simple baselines to the complete system. The intended comparison order is: single temporal models, multi-scale temporal model, multi-scale model with GNN refinement, multi-scale model with confidence-weighted GNN refinement, and finally the full confidence-weighted model with incremental updating. This structure ensures that any improvement can be attributed to a specific modelling choice rather than only to the final combined architecture.
 	
-	\subsection{Dataset and Preprocessing}
+	\section{Dataset and Preprocessing}
 	\label{subsec:dataset_preprocessing}
 	
 	The experiments are conducted on taxi trip records aggregated at the taxi-zone level. Each raw trip record contains at least a pickup timestamp and a pickup location identifier. The pickup timestamp is used to assign the trip to an hourly time interval, while the pickup location identifier is used to assign the trip to a taxi zone. The forecasting task is formulated as one-step-ahead hourly demand prediction. For each taxi zone and each target hour, the model predicts the number of pickup events that will occur in that zone during the next hour.
@@ -1466,7 +1483,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The experiments follow a rolling forecasting protocol. A starting target time is selected, and the system advances by one hour at each rolling step. At every step, all valid zones are predicted for the current target hour, evaluated against observed counts, and then passed to the graph refinement stage. This protocol is closer to practical deployment than a single static train--test split because it evaluates the model repeatedly as the forecast origin moves forward in time.
 	
-	\subsection{Evaluation Protocol and Metrics}
+	\section{Evaluation Protocol and Metrics}
 	\label{subsec:evaluation_protocol_metrics}
 	
 	All models are evaluated under the same one-hour-ahead forecasting setting. For a target hour $t$, each model is allowed to use historical observations up to the context endpoint before the target. The target value is the observed passenger demand during hour $t$. This protocol avoids future information leakage and ensures that the comparison between models is fair. The same filtered taxi-zone set, same rolling target hours, and same historical context definition are used across the temporal baselines, the proposed multi-scale model, and the graph-refined variants.
@@ -1541,7 +1558,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	Together, these metrics provide a more complete evaluation than average error alone. MAE and RMSE measure overall predictive accuracy, MSE highlights large errors, hourly MAE standard deviation measures rolling stability, and worst-hour MAE captures the robustness of the model under difficult target hours.
 	
 	
-	\subsection{Experiment 1: Temporal Baseline Comparison}
+	\section{Experiment 1: Temporal Baseline Comparison}
 	\label{subsec:temporal_baseline_comparison}
 	
 	The first experiment evaluates whether the proposed multi-scale temporal model improves one-hour-ahead taxi demand forecasting compared with standard single temporal models. Four temporal-only models are compared in this experiment: LSTM, GRU, Transformer, and the proposed multi-scale temporal model. No graph refinement or confidence-weighted GNN correction is applied in this stage. Therefore, the purpose of this experiment is to isolate the contribution of the temporal backbone before introducing spatial refinement in later experiments.
@@ -1644,10 +1661,10 @@ Although the current design still leaves room for stronger graph validation, exp
 	Overall, the temporal baseline experiment demonstrates that the proposed multi-scale design is more effective than using a single LSTM, GRU, or Transformer model. The result supports the motivation that taxi demand contains multiple temporal patterns that cannot be fully captured by a single temporal scale. By combining short-term, daily, weekly, and monthly-scale temporal information, the proposed temporal model produces more accurate predictions before any graph-based spatial correction is applied. This establishes a stronger base predictor for the subsequent GNN refinement and confidence-weighted experiments.
 	
 	
-	\subsection{Experiment 2: Effect of Graph-based Residual Refinement}
+	\section{Experiment 2: Effect of Graph-based Residual Refinement}
 	\label{subsec:experiment_2_graph_refinement}
 	
-	This experiment evaluates whether graph-based residual refinement improves the prediction accuracy of the multi-scale temporal model. The temporal-only model is used as the base predictor, and the GraphSAGE module is applied as a second-stage correction model on the taxi-zone graph. The purpose of this experiment is to isolate the contribution of the graph refinement stage before introducing confidence weighting and incremental training in later experiments.
+	This experiment evaluates whether graph-based residual refinement improves the prediction accuracy of the multi-scale temporal model. The temporal-only model is used as the base predictor, and the GraphSAGE module is applied as a second-stage correction model on the taxi-zone graph. The purpose of this experiment is to isolate the contribution of the graph refinement stage before introducing confidence weighting and incremental training in later experiments. All GraphSAGE variants in this experiment use the same OD-flow-derived connectivity graph. OD flow values are used to define graph edges, but the reported GraphSAGE models do not use OD magnitudes as edge weights during message aggregation. Therefore, the experiment evaluates the effect of residual learning over OD-derived graph connectivity, rather than the effect of weighted OD-flow propagation.
 	
 	Three model variants are compared in this experiment:
 	
@@ -1725,7 +1742,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	\]
 	That is, the main improvement comes from the GraphSAGE residual refinement stage, while the additional historical mean features provide only marginal extra benefit.
 	
-	\subsection{Experiment 3: Confidence-weighted GNN Ablation}
+	\section{Experiment 3: Confidence-weighted GNN Ablation}
 	\label{subsec:experiment_3_confidence_weighted_gnn}
 	
 	This experiment evaluates whether the proposed confidence weighting strategy improves the GraphSAGE refinement stage. In Experiment 2, graph-based residual refinement was shown to provide a substantial improvement over the temporal-only model. However, the graph refinement model treats all training nodes equally unless additional weighting is introduced. In practice, not all taxi-zone predictions are equally reliable. Some zones have richer historical data, some predictions have lower MC Dropout uncertainty, and some zones are more consistent with their graph neighbours. Therefore, this experiment investigates whether these confidence signals can be used as sample weights during GNN residual learning.
@@ -1795,7 +1812,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	This indicates that confidence weighting is useful, but its role should be described as improving robustness and stability rather than as the primary source of the overall error reduction.
 	
 	
-	\subsection{Experiment 4: Incremental Training in Rolling Forecasting}
+	\section{Experiment 4: Incremental Training in Rolling Forecasting}
 	\label{subsec:experiment_4_incremental_training}
 	
 	This experiment evaluates whether incremental training improves the performance and stability of the proposed rolling forecasting framework. In the previous experiments, graph-based residual refinement and confidence weighting were evaluated under a fixed rolling setup. However, in a practical forecasting scenario, the prediction target moves forward continuously and new observations become available over time. If the model only reuses an old checkpoint without updating, its parameters may become less adaptive to recent temporal changes. Incremental training is introduced to address this issue by updating the temporal model using newly available data during the rolling process.
@@ -1861,28 +1878,10 @@ Although the current design still leaves room for stronger graph validation, exp
 	This supports the use of incremental updating as a practical extension of the proposed framework. While graph refinement provides the major spatial correction capability, incremental training improves temporal adaptation and reduces performance degradation during rolling forecasting.
 	
 	
-	\subsection{Summary of Experimental Findings}
+	\section{Summary of Experimental Findings}
 	\label{subsec:summary_experimental_findings}
 	
-	This section summarises the main findings from the experimental study. The experiments were designed to evaluate the proposed framework progressively, starting from temporal baselines, then introducing graph-based residual refinement, confidence weighting, and finally incremental training under a rolling forecasting setting. The overall results show that the proposed framework benefits from each major design component, but the magnitude and role of each component are different.
-	
-	First, the temporal baseline comparison establishes the importance of using a stronger temporal backbone before applying graph refinement. The proposed multi-scale temporal model is designed to capture short-term, daily, weekly, and longer-term temporal patterns through separate input branches. This makes it more suitable for taxi demand forecasting than a single-scale temporal model, because urban mobility demand is affected by multiple periodic structures at the same time. The multi-scale temporal model is therefore used as the base predictor for the later graph refinement experiments.
-	
-	Second, Experiment 2 shows that graph-based residual refinement is the main source of accuracy improvement in the proposed pipeline. The temporal-only multi-scale model, denoted as T4, achieves an MAE of 33.4804 and an RMSE of 51.9800. After adding GraphSAGE residual refinement, G1 reduces MAE to 16.2106 and RMSE to 30.5118. This corresponds to a 51.58\% reduction in MAE compared with the temporal-only model. This large improvement confirms that spatial structure is highly useful for correcting zone-level temporal forecasting errors.
-	
-	The comparison between G1 and G2 further clarifies the role of historical mean features. G2 adds \texttt{mean\_24h}, \texttt{mean\_168h}, and \texttt{mean\_720h} to the GNN input. However, its MAE is 16.2040, which is only slightly lower than the G1 MAE of 16.2106. Similarly, RMSE decreases only slightly from 30.5118 to 30.3489. Therefore, the results suggest that the main improvement comes from graph-based residual correction rather than from the additional historical mean features. A reasonable interpretation is that the multi-scale temporal model has already encoded much of the temporal context, so the simple historical averages provide only limited additional information to the GNN.
-	
-	Third, Experiment 3 shows that confidence weighting improves the robustness of the GNN refinement stage, but it should not be interpreted as the main source of the overall error reduction. Compared with the unweighted GNN, the stability-only confidence setting achieves the best average accuracy. It reduces MAE from 16.6460 to 16.4645, RMSE from 29.2035 to 28.9847, and MSE from 852.8439 to 840.1146. This indicates that MC Dropout stability is the most informative individual confidence signal for reducing average prediction error.
-	
-	The neighbourhood-only confidence setting provides the strongest rolling stability. It reduces the standard deviation of hourly MAE from 7.6376 to 7.4499, which is the lowest value among the tested confidence variants. This suggests that neighbourhood consistency is particularly useful for reducing hour-to-hour variation in graph refinement performance. The full confidence model improves all metrics compared with the unweighted GNN, but it is not the best model for every individual metric. Its MAE is 16.5793 and its standard deviation of hourly MAE is 7.4500. Therefore, full confidence should be interpreted as a balanced weighting strategy that combines accuracy and stability, rather than as the strongest configuration for a single metric.
-	
-	Fourth, Experiment 4 demonstrates that incremental training improves both prediction accuracy and rolling stability. In the non-incremental setting, the base temporal model obtains an MAE of 34.9008 and an RMSE of 54.2014. With incremental training, the base temporal MAE decreases to 26.3093 and RMSE decreases to 40.5043. This shows that incremental updating allows the temporal model to adapt better as new observations become available during the rolling process.
-	
-	The benefit of incremental training is also preserved after graph refinement. The non-incremental GNN-refined model achieves an MAE of 14.7466 and an RMSE of 30.3834. With incremental training, the GNN-refined MAE decreases to 13.0842 and RMSE decreases to 24.8755. This confirms that improving the temporal base prediction also benefits the graph refinement stage, because the GNN learns residual corrections on top of the temporal prior. When the base prediction is more accurate and adaptive, the residual learning problem becomes easier and more stable.
-	
-	Incremental training also improves the stability of rolling prediction. For the base temporal model, the standard deviation of hourly MAE decreases from 12.6363 to 10.2752. For the GNN-refined model, it decreases from 7.7932 to 5.7611. This shows that incremental training does not only reduce average error, but also makes the forecasting pipeline more consistent across rolling target hours.
-	
-	The overall experimental findings can be summarised as follows:
+	This chapter evaluated the proposed framework through four staged experiments. The purpose of this staged design was to isolate the contribution of each modelling choice before assessing the complete rolling forecasting pipeline. The results show that the components contribute differently: the multi-scale temporal model provides the base prediction, GraphSAGE residual refinement provides the largest accuracy improvement, confidence weighting offers a smaller robustness-oriented adjustment, and incremental training improves adaptation under rolling prediction.
 	
 	\begin{table}[H]
 		\centering
@@ -1892,36 +1891,24 @@ Although the current design still leaves room for stronger graph validation, exp
 			\toprule
 			\textbf{Experiment} & \textbf{Main Question} & \textbf{Finding} \\
 			\midrule
-			Experiment 1 & Does the multi-scale temporal model provide a strong temporal baseline? & The multi-scale temporal model is used as the main temporal backbone because it captures multiple temporal patterns, including short-term, daily, weekly, and longer-term demand structures. \\
+			Experiment 1 & Does the multi-scale temporal model provide a strong temporal baseline? & The multi-scale model performs better than the single temporal baselines and is therefore used as the temporal backbone for later experiments. \\
 			\midrule
-			Experiment 2 & Does graph refinement improve temporal prediction? & GraphSAGE residual refinement substantially improves the temporal-only model. MAE decreases from 33.4804 to 16.2106 in G1, showing that graph-based correction is the main source of accuracy improvement. \\
+			Experiment 2 & Does graph refinement improve temporal prediction? & GraphSAGE residual refinement produces the largest improvement, showing that graph-based correction is the main source of accuracy gain. \\
 			\midrule
-			Experiment 3 & Does confidence weighting improve GNN refinement? & Confidence weighting provides moderate robustness improvement. Stability-only confidence gives the best average accuracy, while neighbourhood-only confidence gives the best rolling stability. Full confidence provides a balanced improvement. \\
+			Experiment 3 & Does confidence weighting improve GNN refinement? & Confidence weighting provides a limited but useful robustness improvement. Stability-based confidence is most useful for average accuracy, while neighbourhood consistency is most useful for rolling stability. \\
 			\midrule
-			Experiment 4 & Does incremental training improve rolling forecasting? & Incremental training improves both the base temporal model and the GNN-refined model. Final GNN MAE decreases from 14.7466 to 13.0842, and hourly MAE standard deviation decreases from 7.7932 to 5.7611. \\
+			Experiment 4 & Does incremental training improve rolling forecasting? & Incremental training improves both the temporal model and the graph-refined model, especially in terms of rolling stability. \\
 			\bottomrule
 		\end{tabular}
 	\end{table}
 	
-	Taken together, the experiments support the proposed two-stage forecasting design. The temporal model provides the initial zone-level prediction, the GraphSAGE module performs spatial residual correction, the confidence mechanism improves robustness, and incremental training improves adaptation in the rolling setting. The most significant accuracy gain comes from graph-based residual refinement, while confidence weighting and incremental training mainly improve stability and practical reliability.
-	
-	The final conclusion is that the proposed framework should not be viewed as a single monolithic model, but as a structured forecasting pipeline:
-	\[
-	\text{Multi-scale Temporal Prediction}
-	\rightarrow
-	\text{GraphSAGE Residual Refinement}
-	\rightarrow
-	\text{Confidence-weighted Robustness}
-	\rightarrow
-	\text{Incremental Rolling Adaptation}.
-	\]
-	Each stage contributes differently. Graph refinement provides the largest reduction in prediction error, confidence weighting improves the reliability of graph learning, and incremental training makes the system more adaptive and stable over time. This supports the overall claim that combining temporal modelling, graph-based correction, uncertainty-aware weighting, and incremental updating is effective for rolling taxi demand forecasting.
+	Overall, the experimental results support the use of a two-stage forecasting pipeline. The strongest evidence is for graph-based residual refinement, while confidence weighting and incremental training should be interpreted as supporting mechanisms that improve robustness, stability, and practical adaptability. The next chapter discusses why these patterns occur and what limitations they imply for real deployment.
 	
 	
 	\chapter{Discussion}
 	\label{sec:discussion}
 	
-	\subsection{Overview of the Main Findings}
+	\section{Overview of the Main Findings}
 	\label{subsec:discussion_overview}
 	
 	The experimental results show that the proposed framework is best understood as a structured forecasting pipeline rather than as a single isolated model. The final system combines four main ideas: multi-scale temporal prediction, graph-based residual refinement, confidence-weighted graph training, and incremental adaptation in a rolling forecasting setting. The results indicate that these components do not contribute equally. The largest improvement comes from graph-based residual refinement, while confidence weighting and incremental training contribute more to robustness, stability, and practical adaptability.
@@ -1938,7 +1925,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Overall, the experiments suggest a clear hierarchy of contributions. Graph-based residual refinement is the primary source of accuracy improvement. Confidence weighting improves the reliability of graph learning by controlling the influence of uncertain nodes. Incremental training improves adaptation to new data and stabilises the rolling forecasting process. The multi-scale temporal model provides the necessary base prediction, but its full value is realised when it is combined with graph refinement and rolling adaptation.
 	
-	\subsection{Interpretation of the Multi-scale Temporal Model}
+	\section{Interpretation of the Multi-scale Temporal Model}
 	\label{subsec:discussion_temporal_model}
 	
 	The multi-scale temporal model is motivated by the observation that taxi demand has multiple temporal patterns. Hourly demand may be affected by immediate local changes, daily routines, weekly cycles, and longer-term demand levels. A single temporal window may not be able to represent all of these structures. For example, a short recurrent window can respond quickly to recent changes, but it may not capture weekly periodicity. A longer window can encode slower patterns, but it may smooth out short-term fluctuations. The proposed temporal model therefore separates the input into multiple temporal scales and combines the resulting representations before making the final prediction.
@@ -1959,7 +1946,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Therefore, the discussion of the temporal model should not focus only on architecture. It should also consider how the temporal model is maintained over time. In static evaluation, a multi-scale architecture may be sufficient. In rolling deployment, however, the ability to update the model becomes equally important. The proposed framework addresses this by separating the temporal predictor from the graph correction stage, making it possible to update the temporal model incrementally while retaining the same overall pipeline.
 	
-	\subsection{Interpretation of Graph-based Residual Refinement}
+	\section{Interpretation of Graph-based Residual Refinement}
 	\label{subsec:discussion_graph_refinement}
 	
 	The strongest experimental finding is the effectiveness of graph-based residual refinement. The comparison between T4 and G1 shows that adding GraphSAGE leads to a large reduction in error. This indicates that spatial structure contains important information that is not fully captured by the temporal model. In taxi demand forecasting, the spatial dimension is not merely geographic. Zones are related through passenger flows, functional similarity, and urban structure. An origin--destination flow graph can capture these relationships more meaningfully than a simple distance-based adjacency graph, because it reflects how people actually move between zones.
@@ -1984,7 +1971,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	\]
 	is therefore a favourable outcome. It indicates that spatial residual learning is effective, while handcrafted features are auxiliary.
 	
-	\subsection{Interpretation of Confidence Weighting}
+	\section{Interpretation of Confidence Weighting}
 	\label{subsec:discussion_confidence_weighting}
 	
 	The confidence module was introduced to address a practical issue in graph residual learning: not every node should contribute equally to the training loss. Some zone predictions are more reliable than others. A high-volume zone may have rich history, but it may also experience large fluctuations. A sparse zone may have little data and high uncertainty. A prediction that is inconsistent with its neighbours may represent either a genuine local event or an unreliable outlier. The confidence module attempts to capture these aspects through three signals: prior score, stability score, and neighbourhood consistency score.
@@ -2005,7 +1992,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	However, the magnitude of the confidence improvement should not be overstated. The reduction in MAE from the unweighted GNN to the best confidence setting is around one percent. This means that confidence weighting is not the main source of the framework's predictive power. The main accuracy gain comes from adding graph residual refinement. Confidence weighting should therefore be presented as a robustness and stability enhancement. This is still valuable, especially in rolling forecasting, but it should be distinguished from the primary contribution of graph refinement.
 	
-	\subsection{Interpretation of Incremental Training}
+	\section{Interpretation of Incremental Training}
 	\label{subsec:discussion_incremental_training}
 	
 	Incremental training addresses the dynamic nature of rolling forecasting. In a rolling setup, the forecast origin moves forward step by step, and new data become available over time. A model that is trained once and reused may gradually become less aligned with the most recent demand distribution. Incremental training aims to reduce this problem by updating the model using newly available observations rather than relying only on an older checkpoint.
@@ -2024,7 +2011,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Despite these risks, the experimental evidence indicates that incremental training is beneficial in the current setting. The improvement in both mean error and hourly stability suggests that the model adapts in a useful direction rather than overfitting. This supports the thesis claim that rolling demand forecasting should not be treated as a static prediction problem. The model should be updated as the data distribution evolves.
 	
-	\subsection{Practical Implications}
+	\section{Practical Implications}
 	\label{subsec:discussion_practical_implications}
 	
 	The proposed framework has several practical implications for urban mobility forecasting. First, the results show that accurate taxi demand prediction should combine temporal and spatial information. A temporal model alone can capture historical patterns, but spatial correction can substantially improve the final prediction. This is relevant for operational systems where demand in one zone is related to nearby or flow-connected zones. For example, a dispatch system may need to anticipate demand not only in isolated zones but across connected regions of the city. A graph-based refinement stage provides a mechanism for incorporating this dependency.
@@ -2041,7 +2028,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The framework also has implications for model maintenance. In many machine learning systems, retraining is treated as a separate offline process. However, the rolling forecasting results show that updating strategy is part of model performance. A model that performs well immediately after training may degrade as the data distribution changes. Incremental training provides a way to maintain model relevance without full retraining. Therefore, for practical urban forecasting systems, model maintenance should be designed as part of the forecasting pipeline rather than as an afterthought.
 	
-	\subsection{Limitations}
+	\section{Limitations}
 	\label{subsec:discussion_limitations}
 	
 	Several limitations should be acknowledged. The first limitation is the scale of the rolling evaluation. The current experiments focus on a 24-hour rolling period. This is useful for demonstrating the behaviour of the framework over a complete day, but it is not sufficient to fully establish long-term generalisation. Taxi demand can vary across weeks, seasons, holidays, weather conditions, and special events. A stronger evaluation would include multiple rolling windows across different dates and demand regimes. This would show whether the observed improvements remain consistent under broader conditions.
@@ -2062,7 +2049,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	The ninth limitation is that the current approach uses a two-stage pipeline rather than end-to-end joint training. This improves modularity and interpretability, but it may prevent the temporal and graph stages from co-adapting optimally. An end-to-end spatiotemporal model could potentially learn temporal and spatial dependencies jointly. However, such models are also more complex and may be harder to debug, especially under rolling and incremental settings. The two-stage approach is therefore a pragmatic design choice, but it is not the only possible architecture.
 	
-	\subsection{Future Work}
+	\section{Future Work}
 	\label{subsec:discussion_future_work}
 	
 	Future work should first extend the evaluation to longer and more diverse rolling periods. Testing the model across multiple days, weeks, and months would provide stronger evidence of generalisation. It would also allow analysis of weekday versus weekend behaviour, peak versus off-peak hours, and normal versus abnormal demand conditions. A broader evaluation would make it possible to determine whether graph refinement and incremental training remain consistently effective under different traffic regimes.
@@ -2081,7 +2068,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Finally, future work could compare the proposed two-stage framework with fully integrated spatiotemporal neural networks. Models such as diffusion convolutional recurrent networks, temporal graph networks, or attention-based spatiotemporal transformers could be used as stronger baselines. Such comparisons would clarify whether the modular two-stage design provides competitive accuracy while retaining better interpretability and easier incremental updating.
 	
-	\subsection{Concluding Discussion}
+	\section{Concluding Discussion}
 	\label{subsec:discussion_concluding}
 	
 	The discussion shows that the proposed framework is effective because it combines complementary modelling ideas. The temporal model captures within-zone demand history. The graph refinement stage uses spatial relationships to correct residual errors. The confidence module controls the influence of uncertain nodes. Incremental training adapts the model as new data become available. The experimental results support this design, while also showing that the components have different roles.
@@ -2093,40 +2080,26 @@ Although the current design still leaves room for stronger graph validation, exp
 	At the same time, the results should be interpreted with appropriate caution. The graph refinement stage demonstrates strong spatial correction ability, but future work should test stricter temporal generalisation. The confidence module improves robustness, but its calibration should be studied more deeply. Incremental training improves rolling performance, but its computational cost and long-term behaviour require further evaluation. These limitations do not weaken the central contribution. Instead, they clarify the boundary of the current work and provide a concrete path for future development.
 	
 	In summary, the framework demonstrates that combining multi-scale temporal prediction, graph-based residual correction, confidence-aware weighting, and incremental updating can substantially improve taxi demand forecasting. The experimental evidence supports the claim that spatial structure and rolling adaptation are essential for this task. The project therefore contributes not only a forecasting model, but also a modular methodology for building more reliable spatiotemporal prediction systems.
+
+
 	\chapter{Conclusion}
 	\label{sec:conclusion}
 	
-	This thesis investigated the problem of short-term urban taxi demand forecasting at the taxi-zone level. The central objective was to design and evaluate a forecasting framework that can capture both temporal demand dynamics and spatial dependency between zones under a rolling prediction setting. The work was motivated by the observation that urban mobility demand is not determined by a single source of information. Taxi demand changes over time according to short-term fluctuations, daily routines, weekly cycles, and longer-term trends. At the same time, demand in one zone is spatially coupled with demand in neighbouring or flow-connected zones. A forecasting model that only considers the historical sequence of each zone may therefore miss important spatial information, while a purely graph-based model may lack a strong temporal prior. To address this, the thesis proposed a two-stage framework that combines multi-scale temporal forecasting with graph-based residual refinement.
+	This thesis investigated short-term urban taxi demand forecasting at the taxi-zone level. The main objective was to design and evaluate a forecasting framework that combines temporal demand modelling with graph-based correction under a rolling prediction setting. The work was motivated by the fact that taxi demand is both temporal and spatial: each zone has its own historical demand pattern, but zones are also connected through passenger flows, commuting behaviour, and wider urban structure.
 	
-	The proposed system consists of four main components. The first component is a multi-scale temporal prediction model. This model uses several historical windows to represent different temporal scales, including short-term, daily, weekly, and longer-term demand patterns. The purpose of this stage is to produce an initial demand prediction for each taxi zone based on its own historical behaviour. The second component is a GraphSAGE-based graph refinement model. Instead of predicting taxi demand directly, the graph model learns the residual between the temporal prediction and the observed demand. The final prediction is then obtained by adding the predicted residual correction to the temporal prediction. This design allows the temporal model to capture within-zone time-series patterns, while the graph model focuses on correcting spatially structured errors. The third component is a confidence-weighting mechanism. It combines prior data sufficiency, MC Dropout stability, and neighbourhood consistency into node-level confidence scores, which are used to weight the graph residual learning process. The fourth component is incremental training, which allows the temporal model to adapt during rolling forecasting as new observations become available.
+	To address this problem, the thesis proposed a two-stage forecasting framework. The first stage uses a multi-scale temporal model to generate a base next-hour demand prediction for each taxi zone. This model combines several historical windows so that short-term, daily, weekly, and longer-term demand patterns can be represented together. The second stage applies GraphSAGE-based residual refinement on an origin--destination-derived taxi-zone graph. Rather than predicting demand directly, the graph model learns a correction term on top of the temporal prediction. This allows the temporal model to capture within-zone dynamics, while the graph model focuses on correcting residual errors using graph-based relationships between zones.
 	
-	The experimental results support the effectiveness of this structured design. The most significant improvement comes from graph-based residual refinement. In Experiment 2, the temporal-only multi-scale model achieved an MAE of 33.4804 and an RMSE of 51.9800. After adding GraphSAGE residual refinement, the MAE decreased to 16.2106 and the RMSE decreased to 30.5118. This corresponds to a reduction of more than 50\% in MAE compared with the temporal-only prediction. This result demonstrates that the residual errors produced by the temporal model are not purely random. Instead, they contain spatial patterns that can be learned from the taxi-zone graph. The graph refinement stage is therefore the main source of accuracy improvement in the proposed pipeline.
+	The experimental results provide evidence that the proposed staged design is useful, although the components were evaluated progressively rather than as a single fully end-to-end system. The multi-scale temporal model provides a stronger baseline than single temporal models such as LSTM, GRU, and Transformer. The largest improvement comes from GraphSAGE residual refinement, which suggests that the temporal model leaves residual errors that can be partly corrected using graph information. Additional historical mean features provide only marginal benefit, suggesting that the temporal prediction already contains much of the historical demand information needed by the GNN.
 	
-	The experiment also showed that adding simple historical mean features to the GNN provides only marginal additional benefit. The model with GraphSAGE and historical features achieved an MAE of 16.2040, which is only slightly lower than the GraphSAGE model without those features. This indicates that the improvement is mainly due to graph-based residual correction rather than handcrafted historical statistics. A likely explanation is that the multi-scale temporal model already encodes much of the information represented by features such as \texttt{mean\_24h}, \texttt{mean\_168h}, and \texttt{mean\_720h}. Therefore, these historical mean features provide auxiliary context, but they are not the central driver of performance improvement.
+	The confidence-weighting mechanism provides a smaller but useful robustness-oriented improvement. The ablation study shows that MC Dropout stability is most useful for improving average accuracy, while neighbourhood consistency is more useful for improving rolling stability. Therefore, confidence weighting should be understood as a supporting mechanism rather than the main source of the framework's accuracy gain. Its main value is to reduce the influence of less reliable nodes during graph residual learning.
 	
-	Experiment 3 evaluated the confidence-weighted GNN mechanism. The results showed that confidence weighting provides a moderate but useful improvement in robustness. Among the individual confidence components, the MC Dropout stability score produced the best average accuracy, reducing MAE from 16.6460 in the unweighted GNN to 16.4645. This suggests that uncertainty estimated from stochastic forward passes is a useful signal for identifying reliable predictions. The neighbourhood-only confidence score produced the lowest standard deviation of hourly MAE, indicating that neighbourhood consistency is especially useful for stabilising rolling predictions. The full confidence model improved all metrics compared with the unweighted GNN, although it was not the best model for every individual metric. This shows that confidence weighting should be interpreted as a robustness enhancement rather than as the primary source of error reduction. Its main value is to reduce the influence of unreliable nodes during graph training and to make the refinement process more stable.
+	The thesis also showed that incremental training improves rolling forecasting performance. By updating the temporal model as new observations become available, the framework becomes more adaptive than a static checkpoint-based approach. This improves the quality of the temporal prior and makes the subsequent graph residual correction more stable. The result suggests that rolling demand forecasting should be treated not only as a prediction task, but also as a model-maintenance problem.
 	
-	Experiment 4 evaluated incremental training in the rolling forecasting setting. The results showed that incremental updating improves both the base temporal model and the final graph-refined model. For the temporal-only prediction, incremental training reduced MAE from 34.9008 to 26.3093. After graph refinement, incremental training reduced MAE from 14.7466 to 13.0842 and reduced RMSE from 30.3834 to 24.8755. It also improved rolling stability, reducing the standard deviation of hourly MAE for the GNN-refined model from 7.7932 to 5.7611. These results confirm that rolling demand forecasting benefits from updating the model as new data arrive. A static checkpoint can become less representative as the forecast origin moves forward, while incremental updating allows the model to adapt to recent demand changes. This makes incremental training particularly important for practical deployment scenarios where demand patterns evolve continuously.
+	The main contribution of this thesis is therefore a modular forecasting pipeline in which multi-scale temporal prediction, graph-based residual refinement, confidence-aware weighting, and incremental adaptation are investigated as complementary components. The modular design is useful because each component has a distinct role and can be analysed or improved independently. The temporal model provides the initial zone-level forecast, the graph model performs residual correction using taxi-zone relationships, the confidence mechanism provides a robustness-oriented weighting signal, and incremental training improves adaptation over time.
 	
-	Overall, the experiments demonstrate that each part of the proposed framework contributes differently. The multi-scale temporal model provides the base prediction and captures within-zone temporal structure. The graph refinement model provides the largest improvement in predictive accuracy by correcting spatially structured residual errors. The confidence module improves the reliability of the graph refinement process by weighting nodes according to their estimated trustworthiness. Incremental training improves adaptation and reduces instability during rolling forecasting. The final system should therefore be understood as a modular forecasting pipeline rather than a single monolithic model:
+	Several limitations remain. The rolling evaluation period is limited, and future work should test the framework across longer and more diverse time periods. The current graph refinement protocol evaluates node-level residual generalisation within each target hour; a stricter future-facing protocol should train the graph model on previous hours and test it on future hours. In addition, the current GraphSAGE implementation mainly uses OD-derived connectivity rather than fully exploiting edge-weight magnitudes. Future work should explore weighted message passing, graph attention, dynamic graphs, and stronger spatiotemporal baselines. The confidence mechanism could also be improved through learned or calibrated confidence fusion, and external features such as weather, holidays, events, and transport disruptions could be incorporated.
 	
-	\begin{figure}[h]
-		\centering
-		\includegraphics[width=1\textwidth]{img/7.1.png}
-		\caption{Stage-wise structure of the proposed rolling taxi-demand forecasting framework, progressing from multi-scale temporal prediction to GraphSAGE residual refinement, confidence-weighted learning, and incremental rolling adaptation.}
-		\label{fig:7.1}
-	\end{figure}
-	
-	
-	This modular structure is one of the main strengths of the work. It allows each component to be analysed, improved, and replaced independently. For example, the temporal backbone could be changed without redesigning the graph refinement module, and the GraphSAGE component could be replaced by another graph neural network architecture in future work.
-	
-	The thesis makes several contributions. First, it proposes a two-stage forecasting architecture for taxi-zone demand prediction, where a multi-scale temporal model is followed by graph-based residual correction. This design combines the strengths of temporal sequence modelling and graph neural networks while keeping their responsibilities clearly separated. Second, it demonstrates that residual learning on a taxi-zone graph can substantially improve temporal-only predictions. Third, it introduces a confidence-weighted graph refinement strategy based on historical sufficiency, MC Dropout stability, and neighbourhood consistency. Fourth, it evaluates incremental training as a practical mechanism for improving rolling forecasting stability. Together, these contributions show that short-term taxi demand forecasting can benefit from combining temporal modelling, spatial correction, uncertainty-aware weighting, and online adaptation.
-	
-	Despite these positive findings, several limitations remain. The rolling evaluation period is relatively limited, and future work should test the framework across a wider range of dates, weeks, seasons, and abnormal demand conditions. The current graph refinement protocol evaluates node-level residual correction within rolling target hours, but a stricter future-facing evaluation should train the graph model on previous hours and test it on future hours. This would better reflect real-time deployment. Another limitation is that the current graph primarily uses connectivity derived from the OD flow matrix, while edge weights are not fully exploited in the message passing operation. A weighted graph neural network or graph attention mechanism could make better use of flow intensity. In addition, the confidence fusion strategy uses fixed manually selected weights. Future work could learn these weights automatically or calibrate the confidence score against actual prediction errors.
-	
-	Further extensions could also improve the system. External contextual features such as weather, public holidays, special events, public transport disruptions, and land-use information could help explain demand changes that are difficult to infer from historical taxi counts alone. A dynamic graph could be used to represent changes in inter-zone relationships over time, rather than relying on a static OD-based structure. More advanced uncertainty methods, such as quantile regression, deep ensembles, or conformal prediction, could provide calibrated prediction intervals rather than only point estimates and confidence scores. Finally, more detailed efficiency evaluation would be useful, especially for deployment. Since the framework involves per-zone temporal modelling, rolling updates, and graph refinement, runtime, memory usage, and update latency should be measured systematically.
-	
-	In conclusion, this thesis shows that taxi demand forecasting should be treated as a dynamic spatiotemporal problem. The results demonstrate that a temporal model alone is not sufficient, even when it uses multiple historical scales. Spatial dependency between taxi zones provides important information for correcting temporal forecasting errors. The proposed GraphSAGE residual refinement stage successfully captures this information and produces a large improvement in prediction accuracy. Confidence weighting further improves the reliability of graph learning, while incremental training improves adaptation and stability under rolling forecasting. The final framework therefore provides a practical and extensible approach to taxi-zone demand prediction. It shows that combining multi-scale temporal modelling, graph-based residual correction, uncertainty-aware confidence weighting, and incremental updating can produce more accurate and stable forecasts for urban mobility systems.
+	In conclusion, this thesis demonstrates that taxi demand forecasting can benefit from combining temporal modelling with graph-based residual correction. A temporal model alone does not fully capture the structure of taxi-zone demand, while a graph model benefits from having a strong temporal prior. The proposed two-stage framework provides a promising and extensible approach for rolling taxi-zone demand forecasting. The experimental evidence most strongly supports graph-based residual refinement, while confidence weighting and incremental training provide additional robustness and adaptability benefits.
 	
 	% ---------------------------
 	% Back matter

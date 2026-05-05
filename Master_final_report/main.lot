@@ -3,13 +3,13 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{97}{table.caption.24}%
-\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{98}{table.caption.26}%
-\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{99}{table.caption.27}%
-\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{101}{table.caption.28}%
-\contentsline {table}{\numberline {5.5}{\ignorespaces Experiment 3 results: confidence-weighted GNN ablation.}}{105}{table.caption.30}%
-\contentsline {table}{\numberline {5.6}{\ignorespaces Experiment 4 results: non-incremental training vs incremental training.}}{109}{table.caption.32}%
-\contentsline {table}{\numberline {5.7}{\ignorespaces Summary of the main experimental findings.}}{114}{table.caption.34}%
+\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{99}{table.caption.24}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{100}{table.caption.26}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{101}{table.caption.27}%
+\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{104}{table.caption.28}%
+\contentsline {table}{\numberline {5.5}{\ignorespaces Experiment 3 results: confidence-weighted GNN ablation.}}{107}{table.caption.30}%
+\contentsline {table}{\numberline {5.6}{\ignorespaces Experiment 4 results: non-incremental training vs incremental training.}}{111}{table.caption.32}%
+\contentsline {table}{\numberline {5.7}{\ignorespaces Summary of the main experimental findings.}}{115}{table.caption.34}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
