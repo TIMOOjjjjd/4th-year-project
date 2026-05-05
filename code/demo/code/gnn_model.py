@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,9 @@ class MultiScaleGraphSAGE(nn.Module):
 
 
 def _prepare_predictions_frame(
-    merged_csv_path: Optional[str], predictions_df: Optional[pd.DataFrame]
+    merged_csv_path: Optional[str],
+    predictions_df: Optional[pd.DataFrame],
+    require_label: bool,
 ) -> pd.DataFrame:
     if predictions_df is not None and merged_csv_path is not None:
         raise ValueError("Provide either predictions_df or merged_csv_path, not both.")
@@ -54,11 +56,258 @@ def _prepare_predictions_frame(
             raise ValueError("Either predictions_df or merged_csv_path must be provided.")
         df_pred = pd.read_csv(merged_csv_path)
 
-    required_columns = {"PULocationID", "Prediction", "True Value"}
+    required_columns = {"PULocationID", "Prediction"}
+    if require_label:
+        required_columns.add("True Value")
     missing = required_columns - set(df_pred.columns)
     if missing:
         raise ValueError(f"Predictions dataframe missing columns: {missing}")
     return df_pred
+
+
+def _remap_edges_to_valid_nodes(
+    edge_index: torch.Tensor, valid_indices: torch.Tensor
+) -> torch.Tensor:
+    valid_old = [int(idx) for idx in valid_indices.tolist()]
+    valid_set = set(valid_old)
+    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(valid_old)}
+
+    remapped_edges: List[Tuple[int, int]] = []
+    for src, dst in edge_index.t().tolist():
+        src_i, dst_i = int(src), int(dst)
+        if src_i in valid_set and dst_i in valid_set:
+            remapped_edges.append((old_to_new[src_i], old_to_new[dst_i]))
+
+    if not remapped_edges:
+        return torch.empty((2, 0), dtype=torch.long)
+
+    return torch.tensor(remapped_edges, dtype=torch.long).t().contiguous()
+
+
+def _build_graph_snapshot(
+    df_pred: pd.DataFrame,
+    edge_index: torch.Tensor,
+    zone_names: Sequence[str],
+    zone_idx_map: Dict[str, int],
+    location_to_zone: Dict[int, str],
+    zone_to_location: Dict[str, int],
+    history_feature_cols: Sequence[str],
+    fallback_weights: Optional[torch.Tensor],
+    require_label: bool,
+) -> Data:
+    node_count = len(zone_names)
+    node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
+    node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
+    if fallback_weights is None:
+        node_weights = torch.ones((node_count,), dtype=torch.float32)
+    else:
+        node_weights = fallback_weights.clone().to(dtype=torch.float32)
+    history_tensor = (
+        torch.full((node_count, len(history_feature_cols)), float("nan"), dtype=torch.float32)
+        if history_feature_cols
+        else None
+    )
+
+    for _, row in df_pred.iterrows():
+        try:
+            loc_id = int(row["PULocationID"])
+        except (TypeError, ValueError):
+            continue
+
+        zone_str = location_to_zone.get(loc_id)
+        if not isinstance(zone_str, str):
+            continue
+        idx = zone_idx_map.get(zone_str)
+        if idx is None:
+            continue
+
+        if pd.notna(row.get("Prediction")):
+            node_pred[idx] = float(row["Prediction"])
+        if "True Value" in df_pred.columns and pd.notna(row.get("True Value")):
+            node_label[idx] = float(row["True Value"])
+        if "Confidence" in df_pred.columns and pd.notna(row.get("Confidence")):
+            node_weights[idx] = float(np.clip(row["Confidence"], 0.0, 1.0))
+
+        if history_tensor is not None:
+            values = []
+            for col in history_feature_cols:
+                val = row.get(col)
+                values.append(float(val) if pd.notna(val) else float("nan"))
+            history_tensor[idx] = torch.tensor(values, dtype=torch.float32)
+
+    valid_mask = ~torch.isnan(node_pred)
+    if require_label:
+        valid_mask = valid_mask & ~torch.isnan(node_label)
+    valid_indices = torch.where(valid_mask)[0]
+    if valid_indices.numel() == 0:
+        raise ValueError("No valid graph nodes available.")
+
+    remapped_edge_index = _remap_edges_to_valid_nodes(edge_index, valid_indices)
+
+    node_pred = node_pred[valid_indices]
+    node_label = node_label[valid_indices]
+    node_weights = node_weights[valid_indices]
+    if history_tensor is not None:
+        history_tensor = history_tensor[valid_indices]
+        history_tensor = torch.nan_to_num(history_tensor, nan=0.0)
+        history_tensor = torch.log1p(history_tensor)
+
+    feat_components = [node_pred.unsqueeze(1), node_weights.unsqueeze(1)]
+    if history_tensor is not None and history_tensor.numel() > 0:
+        feat_components.append(history_tensor)
+    x_feat = torch.cat(feat_components, dim=1)
+
+    valid_old_indices = [int(idx) for idx in valid_indices.cpu().tolist()]
+    filtered_zone_names = [str(zone_names[idx]) for idx in valid_old_indices]
+    filtered_location_ids = [
+        int(zone_to_location.get(zone_name, -1)) for zone_name in filtered_zone_names
+    ]
+
+    if require_label:
+        residual_target = node_label - node_pred
+    else:
+        residual_target = torch.full_like(node_pred, float("nan"))
+    data = Data(
+        x=x_feat,
+        edge_index=remapped_edge_index,
+        y=residual_target,
+        base_pred=node_pred,
+        true_value=node_label,
+        confidence=node_weights,
+    )
+    data.zone_names = tuple(filtered_zone_names)
+    data.location_ids = tuple(filtered_location_ids)
+    return data
+
+
+def _build_training_graph(
+    train_predictions_df: pd.DataFrame,
+    edge_index: torch.Tensor,
+    zone_names: Sequence[str],
+    zone_idx_map: Dict[str, int],
+    location_to_zone: Dict[int, str],
+    zone_to_location: Dict[str, int],
+    history_feature_cols: Sequence[str],
+) -> Optional[Data]:
+    if train_predictions_df.empty:
+        return None
+
+    if "target_hour" in train_predictions_df.columns:
+        grouped_frames = [
+            frame for _, frame in train_predictions_df.groupby("target_hour", sort=True)
+        ]
+    else:
+        grouped_frames = [train_predictions_df]
+
+    snapshots: List[Data] = []
+    for frame in grouped_frames:
+        try:
+            snapshot = _build_graph_snapshot(
+                df_pred=frame,
+                edge_index=edge_index,
+                zone_names=zone_names,
+                zone_idx_map=zone_idx_map,
+                location_to_zone=location_to_zone,
+                zone_to_location=zone_to_location,
+                history_feature_cols=history_feature_cols,
+                fallback_weights=None,
+                require_label=True,
+            )
+        except ValueError:
+            continue
+        snapshots.append(snapshot)
+
+    if not snapshots:
+        return None
+
+    x_parts: List[torch.Tensor] = []
+    y_parts: List[torch.Tensor] = []
+    base_parts: List[torch.Tensor] = []
+    confidence_parts: List[torch.Tensor] = []
+    edge_parts: List[torch.Tensor] = []
+    offset = 0
+    for snapshot in snapshots:
+        x_parts.append(snapshot.x)
+        y_parts.append(snapshot.y)
+        base_parts.append(snapshot.base_pred)
+        confidence_parts.append(snapshot.confidence)
+        if snapshot.edge_index.numel() > 0:
+            edge_parts.append(snapshot.edge_index + offset)
+        offset += snapshot.num_nodes
+
+    if edge_parts:
+        combined_edge_index = torch.cat(edge_parts, dim=1)
+    else:
+        combined_edge_index = torch.empty((2, 0), dtype=torch.long)
+
+    return Data(
+        x=torch.cat(x_parts, dim=0),
+        edge_index=combined_edge_index,
+        y=torch.cat(y_parts, dim=0),
+        base_pred=torch.cat(base_parts, dim=0),
+        confidence=torch.cat(confidence_parts, dim=0),
+    )
+
+
+def _build_output_frame(
+    inference_data: Data,
+    refined_pred: torch.Tensor,
+    final_output_csv: Optional[str],
+) -> Tuple[pd.DataFrame, Dict[str, float]]:
+    y_true = inference_data.true_value.cpu().numpy().reshape(-1)
+    y_refined = refined_pred.detach().cpu().numpy().reshape(-1)
+    node_pred_base = inference_data.base_pred.cpu().numpy().reshape(-1)
+    confidence_vals = inference_data.confidence.cpu().numpy().reshape(-1)
+
+    output_df = pd.DataFrame(
+        {
+            "PULocationID": list(inference_data.location_ids),
+            "ZoneName": list(inference_data.zone_names),
+            "GRU_Pred": node_pred_base,
+            "Refined_Pred": y_refined,
+            "True_Value": y_true,
+            "Confidence": confidence_vals,
+        }
+    )
+
+    valid_metric = output_df[["GRU_Pred", "Refined_Pred", "True_Value"]].notna().all(axis=1)
+    if valid_metric.any():
+        metric_df = output_df.loc[valid_metric]
+        mae_gru = np.mean(np.abs(metric_df["GRU_Pred"] - metric_df["True_Value"]))
+        mae_refined = np.mean(np.abs(metric_df["Refined_Pred"] - metric_df["True_Value"]))
+        mse_gru = np.mean((metric_df["GRU_Pred"] - metric_df["True_Value"]) ** 2)
+        mse_refined = np.mean((metric_df["Refined_Pred"] - metric_df["True_Value"]) ** 2)
+    else:
+        mae_gru = mae_refined = mse_gru = mse_refined = float("nan")
+
+    print(f"GRU vs True MAE = {mae_gru:.4f}")
+    print(f"GRU vs True MSE = {mse_gru:.4f}")
+    print(f"Refined vs True MAE = {mae_refined:.4f}")
+    print(f"Refined vs True MSE = {mse_refined:.4f}")
+
+    if final_output_csv:
+        output_df.to_csv(
+            final_output_csv,
+            columns=[
+                "PULocationID",
+                "ZoneName",
+                "GRU_Pred",
+                "Refined_Pred",
+                "True_Value",
+                "Confidence",
+            ],
+            index=False,
+            encoding="utf-8",
+        )
+        print(f"result saved to '{final_output_csv}'")
+
+    metrics = {
+        "mae_gru": mae_gru,
+        "mse_gru": mse_gru,
+        "mae_refined": mae_refined,
+        "mse_refined": mse_refined,
+    }
+    return output_df, metrics
 
 
 def _build_node_weights(
@@ -103,7 +352,7 @@ def _build_node_weights(
 
     sequence_length = 24 * 30
     start_date = target_date - pd.Timedelta(hours=sequence_length)
-    df_window = df[(df["datetime"] >= start_date) & (df["datetime"] <= target_date)]
+    df_window = df[(df["datetime"] >= start_date) & (df["datetime"] < target_date)]
 
     county_volume = (
         df_window.groupby("PULocationID").size().reset_index(name="Total_Volume")
@@ -142,18 +391,47 @@ def run_gnn_pipeline(
     taxi_zone_lookup: str = "taxi-zone-lookup.csv",
     final_output_csv: Optional[str] = "final_predictions_multiscale.csv",
     predictions_df: Optional[pd.DataFrame] = None,
+    train_predictions_df: Optional[pd.DataFrame] = None,
     zone_confidence: Optional[Dict[int, float]] = None,
     show_plots: bool = True,
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """
-    Execute the GraphSAGE refinement stage using GRU predictions as priors and optional
-    confidence weights derived from MC Dropout variance.
+    Train GraphSAGE on historical residuals, then refine the current target hour.
+
+    ``predictions_df`` is the current inference snapshot. Its ``True Value`` column is
+    used only for metrics. ``train_predictions_df`` must contain historical snapshots
+    with labels and is the only source used to form residual training targets.
     """
-    df_pred = _prepare_predictions_frame(merged_csv_path, predictions_df)
-    df_pred = df_pred[~df_pred["PULocationID"].isin(excluded_zones)].reset_index(drop=True)
-    history_feature_cols = [col for col in HISTORY_FEATURES if col in df_pred.columns]
+    df_pred = _prepare_predictions_frame(
+        merged_csv_path=merged_csv_path,
+        predictions_df=predictions_df,
+        require_label=False,
+    )
+    df_pred = df_pred[~df_pred["PULocationID"].isin(excluded_zones)].reset_index(
+        drop=True
+    )
+    if "True Value" not in df_pred.columns:
+        df_pred["True Value"] = np.nan
+
+    if train_predictions_df is None:
+        train_df = pd.DataFrame()
+    else:
+        train_df = train_predictions_df.copy()
+        required_train_cols = {"PULocationID", "Prediction", "True Value"}
+        missing = required_train_cols - set(train_df.columns)
+        if missing:
+            raise ValueError(f"Training dataframe missing columns: {missing}")
+        train_df = train_df[~train_df["PULocationID"].isin(excluded_zones)].reset_index(
+            drop=True
+        )
+
+    available_cols = set(df_pred.columns) | set(train_df.columns)
+    history_feature_cols = [col for col in HISTORY_FEATURES if col in available_cols]
 
     df_adj = pd.read_csv(edge_weight_csv, index_col=0)
+    df_adj.index = [str(idx).lstrip("\ufeff") for idx in df_adj.index]
+    df_adj.columns = [str(col).lstrip("\ufeff") for col in df_adj.columns]
+    df_adj = df_adj.apply(pd.to_numeric, errors="coerce").fillna(0.0)
     adj_matrix = torch.tensor(df_adj.values, dtype=torch.float32)
     edge_index, _ = dense_to_sparse(adj_matrix)
 
@@ -185,123 +463,73 @@ def run_gnn_pipeline(
         zone_confidence=zone_confidence,
     )
 
-    df_pred["Zone"] = df_pred["PULocationID"].map(location_to_zone)
-    node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
-    node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
-    history_tensor = (
-        torch.full((node_count, len(history_feature_cols)), float("nan"), dtype=torch.float32)
-        if history_feature_cols
-        else None
-    )
-
-    for _, row in df_pred.iterrows():
-        zone_str = row["Zone"]
-        if not isinstance(zone_str, str):
-            continue
-        idx = zone_idx_map.get(zone_str)
-        if idx is None:
-            continue
-        node_pred[idx] = float(row["Prediction"])
-        node_label[idx] = float(row["True Value"])
-        if history_tensor is not None:
-            values = []
-            for col in history_feature_cols:
-                val = row.get(col)
-                if pd.notna(val):
-                    values.append(float(val))
-                else:
-                    values.append(float("nan"))
-            history_tensor[idx] = torch.tensor(values, dtype=torch.float32)
-
-    print("node_pred NaN count:", torch.isnan(node_pred).sum().item())
-    print("node_label NaN count:", torch.isnan(node_label).sum().item())
-
-    valid_indices = torch.where(~torch.isnan(node_pred) & ~torch.isnan(node_label))[0]
-    print(f"⚠️ 仅保留有效索引数量: {valid_indices.numel()}")
-    if valid_indices.numel() == 0:
-        empty_df = pd.DataFrame(
-            columns=["PULocationID", "ZoneName", "GRU_Pred", "Refined_Pred", "True_Value", "Confidence"]
+    try:
+        inference_data = _build_graph_snapshot(
+            df_pred=df_pred,
+            edge_index=edge_index,
+            zone_names=zone_names,
+            zone_idx_map=zone_idx_map,
+            location_to_zone=location_to_zone,
+            zone_to_location=zone_to_location,
+            history_feature_cols=history_feature_cols,
+            fallback_weights=node_weights,
+            require_label=False,
         )
-        metrics = {k: float("nan") for k in ("mae_gru", "mse_gru", "mae_refined", "mse_refined")}
+    except ValueError:
+        empty_df = pd.DataFrame(
+            columns=[
+                "PULocationID",
+                "ZoneName",
+                "GRU_Pred",
+                "Refined_Pred",
+                "True_Value",
+                "Confidence",
+            ]
+        )
+        metrics = {
+            key: float("nan")
+            for key in ("mae_gru", "mse_gru", "mae_refined", "mse_refined")
+        }
         return empty_df, metrics
 
-    filtered_zone_names = [zone_names[i] for i in valid_indices.tolist()]
-    filtered_location_ids = [zone_to_location.get(name, -1) for name in filtered_zone_names]
-
-    old_to_new = {old_idx.item(): new_idx for new_idx, old_idx in enumerate(valid_indices)}
-    valid_edges = (torch.isin(edge_index[0], valid_indices)) & (
-        torch.isin(edge_index[1], valid_indices)
-    )
-    edge_index = edge_index[:, valid_edges]
-    edge_index = torch.tensor(
-        [
-            [old_to_new[i.item()] for i in edge_index[0]],
-            [old_to_new[j.item()] for j in edge_index[1]],
-        ],
-        dtype=torch.long,
-    )
-
-    node_pred = node_pred[valid_indices]
-    node_label = node_label[valid_indices]
-    node_weights = node_weights[valid_indices]
-    if history_tensor is not None:
-        history_tensor = history_tensor[valid_indices]
-        history_tensor = torch.nan_to_num(history_tensor, nan=0.0)
-        history_tensor = torch.log1p(history_tensor)
-
-    node_pred_cpu = node_pred.clone()
-    node_label_cpu = node_label.clone()
-    node_weights_cpu = node_weights.clone()
-
-    residual_target = node_label - node_pred
-
-    feat_components = [node_pred.unsqueeze(1), node_weights.unsqueeze(1)]
-    if history_tensor is not None and history_tensor.numel() > 0:
-        feat_components.append(history_tensor)
-    x_feat = torch.cat(feat_components, dim=1)
-    data = Data(
-        x=x_feat,
+    train_data = _build_training_graph(
+        train_predictions_df=train_df,
         edge_index=edge_index,
-        y=residual_target,
-        base_pred=node_pred,
-        confidence=node_weights,
+        zone_names=zone_names,
+        zone_idx_map=zone_idx_map,
+        location_to_zone=location_to_zone,
+        zone_to_location=zone_to_location,
+        history_feature_cols=history_feature_cols,
     )
-    if zone_confidence is not None:
-        conf_edge_weight = node_weights[edge_index[0]] * node_weights[edge_index[1]]
-        data.edge_weight = conf_edge_weight
+
+    if train_data is None:
+        print("No historical GNN labels available; using base predictions unchanged.")
+        output_df, metrics = _build_output_frame(
+            inference_data=inference_data,
+            refined_pred=inference_data.base_pred,
+            final_output_csv=final_output_csv,
+        )
+        return output_df, metrics
 
     dropout = 0.1
     learning_rate = 0.01
     hidden_dim = 256
     gnn_epochs = 300
 
-    in_dim = x_feat.shape[1]
+    in_dim = train_data.x.shape[1]
     model = MultiScaleGraphSAGE(in_dim=in_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=gnn_epochs)
     loss_func = nn.SmoothL1Loss(reduction="none")
 
-    data = data.to(device)
-    node_label_device = node_label_cpu.to(device)
+    train_data = train_data.to(device)
 
     model.train()
     for epoch in range(1, gnn_epochs + 1):
         optimizer.zero_grad()
-        residual_pred, refined_pred = model(data)
-        loss_per_node = loss_func(residual_pred, data.y)
-        diff = refined_pred - node_label_device
-        sign_penalty = 0.005 * torch.relu(torch.sign(diff) * diff)
-
-        target_residual = data.y
-        significant_target = target_residual.abs() > 5.0
-        sign_mismatch_mask = significant_target & ((residual_pred * target_residual) < 0)
-        mismatch_penalty = 0.1 * sign_mismatch_mask.float() * torch.abs(residual_pred - target_residual)
-
-        # loss_per_node = loss_per_node + sign_penalty
-        if zone_confidence is not None:
-            sample_weights = data.confidence
-        else:
-            sample_weights = torch.ones_like(data.y)
+        residual_pred, _ = model(train_data)
+        loss_per_node = loss_func(residual_pred, train_data.y)
+        sample_weights = train_data.confidence.clamp(min=0.05)
         mean_weight = sample_weights.mean().clamp(min=1e-6)
         normalized_weights = sample_weights / mean_weight
         loss = (loss_per_node * normalized_weights).mean()
@@ -318,42 +546,22 @@ def run_gnn_pipeline(
 
     model.eval()
     with torch.no_grad():
-        residual_pred, refined_pred = model(data)
+        inference_data_device = Data(
+            x=inference_data.x,
+            edge_index=inference_data.edge_index,
+            base_pred=inference_data.base_pred,
+        ).to(device)
+        _, refined_pred = model(inference_data_device)
 
-    y_true = node_label_cpu.cpu().numpy().squeeze()
-    y_refined = refined_pred.cpu().numpy().squeeze()
-    node_pred_base = node_pred_cpu.cpu().numpy().squeeze()
-    confidence_vals = node_weights_cpu.cpu().numpy().squeeze()
-
-    print("Final shapes:")
-    print("node_pred shape:", node_pred_base.shape)
-    print("y_refined shape:", y_refined.shape)
-    print("y_true shape:", y_true.shape)
-
-    output_df = pd.DataFrame(
-        {
-            "PULocationID": filtered_location_ids,
-            "ZoneName": filtered_zone_names,
-            "GRU_Pred": node_pred_base,
-            "Refined_Pred": y_refined,
-            "True_Value": y_true,
-            "Confidence": confidence_vals,
-        }
+    output_df, metrics = _build_output_frame(
+        inference_data=inference_data,
+        refined_pred=refined_pred,
+        final_output_csv=final_output_csv,
     )
 
-    mae_gru = np.mean(np.abs(output_df["GRU_Pred"] - output_df["True_Value"]))
-    mae_refined = np.mean(np.abs(output_df["Refined_Pred"] - output_df["True_Value"]))
-    mse_gru = np.mean((output_df["GRU_Pred"] - output_df["True_Value"]) ** 2)
-    mse_refined = np.mean((output_df["Refined_Pred"] - output_df["True_Value"]) ** 2)
-
-    print(f"GRU vs True MAE = {mae_gru:.4f}")
-    print(f"GRU vs True MSE = {mse_gru:.4f}")
-    print(f"Refined vs True MAE = {mae_refined:.4f}")
-    print(f"Refined vs True MSE = {mse_refined:.4f}")
-
     methods = ["GRU", "GNN(Refined)"]
-    mae_values = [mae_gru, mae_refined]
-    mse_values = [mse_gru, mse_refined]
+    mae_values = [metrics["mae_gru"], metrics["mae_refined"]]
+    mse_values = [metrics["mse_gru"], metrics["mse_refined"]]
 
     if show_plots:
         plt.figure(figsize=(6, 5))
@@ -374,33 +582,35 @@ def run_gnn_pipeline(
         plt.grid(axis="y", linestyle="--", alpha=0.7)
         plt.show()
 
-        plt.scatter(output_df["True_Value"], output_df["GRU_Pred"], label="GRU", alpha=0.6)
-        plt.scatter(output_df["True_Value"], output_df["Refined_Pred"], label="GNN", alpha=0.6)
-        min_val = np.nanmin(
-            [output_df["True_Value"].min(), output_df["GRU_Pred"].min(), output_df["Refined_Pred"].min()]
+        plot_df = output_df.replace([np.inf, -np.inf], np.nan).dropna(
+            subset=["True_Value", "GRU_Pred", "Refined_Pred"]
         )
-        max_val = np.nanmax(
-            [output_df["True_Value"].max(), output_df["GRU_Pred"].max(), output_df["Refined_Pred"].max()]
-        )
-        plt.plot([min_val, max_val], [min_val, max_val], "k-", label="GROUND TRUTH")
-        plt.xlabel("True Values")
-        plt.ylabel("Predictions")
-        plt.legend()
-        plt.show()
+        if not plot_df.empty:
+            plt.scatter(plot_df["True_Value"], plot_df["GRU_Pred"], label="GRU", alpha=0.6)
+            plt.scatter(
+                plot_df["True_Value"],
+                plot_df["Refined_Pred"],
+                label="GNN",
+                alpha=0.6,
+            )
+            min_val = np.nanmin(
+                [
+                    plot_df["True_Value"].min(),
+                    plot_df["GRU_Pred"].min(),
+                    plot_df["Refined_Pred"].min(),
+                ]
+            )
+            max_val = np.nanmax(
+                [
+                    plot_df["True_Value"].max(),
+                    plot_df["GRU_Pred"].max(),
+                    plot_df["Refined_Pred"].max(),
+                ]
+            )
+            plt.plot([min_val, max_val], [min_val, max_val], "k-", label="GROUND TRUTH")
+            plt.xlabel("True Values")
+            plt.ylabel("Predictions")
+            plt.legend()
+            plt.show()
 
-    if final_output_csv:
-        output_df.to_csv(
-            final_output_csv,
-            columns=["PULocationID", "ZoneName", "GRU_Pred", "Refined_Pred", "True_Value", "Confidence"],
-            index=False,
-            encoding="utf-8",
-        )
-        print(f"result saved to '{final_output_csv}'")
-
-    metrics = {
-        "mae_gru": mae_gru,
-        "mse_gru": mse_gru,
-        "mae_refined": mae_refined,
-        "mse_refined": mse_refined,
-    }
     return output_df, metrics

@@ -257,11 +257,28 @@ def _assign_confidence_scores(
     return zone_confidence
 
 
+def _build_gnn_input_frame(step_df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {
+        "y_pred": "Prediction",
+        "y_true": "True Value",
+        "confidence": "Confidence",
+    }
+    gnn_frame = step_df.rename(columns=rename_map)
+    cols = [
+        "target_hour",
+        "PULocationID",
+        "Prediction",
+        "True Value",
+        "Confidence",
+        *HISTORY_FEATURES,
+    ]
+    return gnn_frame[[col for col in cols if col in gnn_frame.columns]]
+
+
 def run_rolling_with_gnn(
     df: pd.DataFrame,
     manager: MultiScaleModelManager,
     device: torch.device,
-    prior_scores: Dict[int, float],
     adjacency: Dict[int, List[int]],
     zone_hourly_counts: pd.Series,
 ) -> None:
@@ -326,8 +343,9 @@ def run_rolling_with_gnn(
 
         step_df = pd.DataFrame(step_records)
         step_df["target_hour"] = target_ts
-        zone_confidence = _assign_confidence_scores(step_df, prior_scores, adjacency)
-        baseline_records.append(step_df)
+        history_df = df[df["datetime"] < target_ts]
+        hour_prior_scores = _compute_prior_scores(history_df)
+        zone_confidence = _assign_confidence_scores(step_df, hour_prior_scores, adjacency)
 
         mask = step_df["y_pred"].notna() & step_df["y_true"].notna()
         if mask.any():
@@ -348,9 +366,14 @@ def run_rolling_with_gnn(
             }
         )
 
-        rename_map = {"y_pred": "Prediction", "y_true": "True Value"}
-        gnn_input_cols = ["PULocationID", "Prediction", "True Value", *HISTORY_FEATURES]
-        gnn_input = step_df.rename(columns=rename_map)[gnn_input_cols]
+        gnn_input = _build_gnn_input_frame(step_df)
+        if baseline_records:
+            gnn_train_input = pd.concat(
+                [_build_gnn_input_frame(prev_df) for prev_df in baseline_records],
+                ignore_index=True,
+            )
+        else:
+            gnn_train_input = pd.DataFrame(columns=gnn_input.columns)
 
         gnn_output_path = (
             f"final_predictions_{MODEL_BACKEND}_{target_ts.strftime('%Y%m%d_%H%M')}.csv"
@@ -364,11 +387,13 @@ def run_rolling_with_gnn(
             zone_total_number=len(zones),
             final_output_csv=gnn_output_path,
             predictions_df=gnn_input,
+            train_predictions_df=gnn_train_input,
             zone_confidence=zone_confidence,
             show_plots=False,
         )
         gnn_output_df["target_hour"] = target_ts
         gnn_records.append(gnn_output_df)
+        baseline_records.append(step_df)
 
         gnn_metrics.append(
             {
@@ -430,14 +455,13 @@ def main() -> None:
     print("Using device:", device)
 
     df = prepare_df()
-    prior_scores = _compute_prior_scores(df)
     lookup_df = _load_zone_lookup(LOOKUP_PATH)
     adjacency = _build_zone_adjacency(EDGE_WEIGHT_MATRIX, lookup_df)
     zone_hourly_counts = _build_zone_hourly_counts(df)
     cfg = ManagerConfig(M_mc_test=MC_DROPOUT_SAMPLES)
     manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
 
-    run_rolling_with_gnn(df, manager, device, prior_scores, adjacency, zone_hourly_counts)
+    run_rolling_with_gnn(df, manager, device, adjacency, zone_hourly_counts)
 
 
 if __name__ == "__main__":
