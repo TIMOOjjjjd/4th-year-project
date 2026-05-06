@@ -1462,7 +1462,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Before model training, the zone-level passenger count series is normalised using min--max scaling. Scaling is fitted on the historical portion available before the prediction target, so that future target information is not used during preprocessing. The scaled series is then converted into sliding windows. For each valid training window, the model receives historical sequences from the four temporal scales and predicts the demand value at the next forecasting step. The prediction horizon is set to one hour, which is consistent with the objective of short-term operational demand forecasting.
 	
-	In addition to temporal features, the graph refinement stage requires a taxi-zone graph. This graph is constructed from an origin--destination flow matrix stored as \texttt{edge\_weight\_matrix\_\allowbreak with\_flow.csv}. Each node represents a taxi zone, and an edge is created when the corresponding flow relationship between two zones is non-zero. The zone lookup table, stored as \texttt{taxi-zone-lookup.csv}, maps between zone names and numeric location identifiers. This mapping is required because the graph matrix is indexed by zone names, whereas the prediction results are indexed by \texttt{PULocationID}. During GNN preparation, the adjacency matrix is converted into a sparse edge representation suitable for graph neural network computation.
+	In addition to temporal features, the graph refinement stage requires a taxi-zone graph. This graph is constructed from an origin--destination flow matrix stored as \texttt{edge\_weight\_\allowbreak matrix\_with\_flow.csv}. Each node represents a taxi zone, and an edge is created when the corresponding flow relationship between two zones is non-zero. The zone lookup table, stored as \texttt{taxi-zone-lookup.csv}, maps between zone names and numeric location identifiers. This mapping is required because the graph matrix is indexed by zone names, whereas the prediction results are indexed by \texttt{PULocationID}. During GNN preparation, the adjacency matrix is converted into a sparse edge representation suitable for graph neural network computation.
 	
 	For each rolling target hour, the temporal model first generates a base prediction for each valid zone. The output table contains the zone identifier, predicted demand, true demand, MC Dropout standard deviation, variance, and additional historical mean features. The historical mean features are computed over three windows:
 	\[
@@ -1688,31 +1688,31 @@ Although the current design still leaves room for stronger graph validation, exp
 	\]
 	Therefore, the GNN does not replace the temporal model. Instead, it operates as a graph-based residual correction module.
 	
-	The experiment is conducted over 24 rolling target hours from \texttt{2021-03-05 00:00:00} to \texttt{2021-03-05 23:00:00}. For each target hour, 258 valid taxi-zone nodes are used. The graph data are split into 155 training nodes, 52 validation nodes, and 51 test nodes. The reported summary metrics are calculated over the rolling test predictions.
+	The experiment is conducted over 24 rolling target hours from \texttt{2021-07-05 00:00:00} to \texttt{2021-07-05 23:00:00}. For each target hour, 258 valid taxi-zone nodes are used. The graph data are split into 155 training nodes, 52 validation nodes, and 51 test nodes. The reported summary metrics are calculated over the rolling test predictions.
 	
-\begin{table}[H]
-	\centering
-	\caption{Experiment 2 results: effect of graph-based residual refinement.}
-	\label{tab:experiment_2_graph_refinement}
-	\resizebox{\textwidth}{!}{%
-		\begin{tabular}{@{}lrrrr@{}}
-			\toprule
-			\textbf{Model} 
-			& \textbf{MAE $\downarrow$} 
-			& \textbf{RMSE $\downarrow$} 
-			& \textbf{MSE $\downarrow$} 
-			& \textbf{MAE Impr.} \\
-			\midrule
-			T4: Multi-scale Temporal 
-			& 33.4804 & 51.9800 & 2701.9194 & -- \\
-			G1: Multi-scale + GNN 
-			& 16.2106 & 30.5118 & 930.9674 & 51.58\% \\
-			G2: Multi-scale + GNN + History Features 
-			& 16.2040 & 30.3489 & 921.0562 & 51.60\% \\
-			\bottomrule
-		\end{tabular}%
-	}
-\end{table}
+	\begin{table}[H]
+		\centering
+		\caption{Experiment 2 results: effect of graph-based residual refinement.}
+		\label{tab:experiment_2_graph_refinement}
+		\resizebox{\textwidth}{!}{%
+			\begin{tabular}{@{}lrrrr@{}}
+				\toprule
+				\textbf{Model} 
+				& \textbf{MAE $\downarrow$} 
+				& \textbf{RMSE $\downarrow$} 
+				& \textbf{MSE $\downarrow$} 
+				& \textbf{MAE Impr.} \\
+				\midrule
+				T4: Multi-scale Temporal 
+				& 24.5697 & 39.8456 & 1587.6757 & -- \\
+				G1: Multi-scale + GNN 
+				& 14.8361 & 27.0384 & 731.0762 & 39.62\% \\
+				G2: Multi-scale + GNN + History Features 
+				& 14.2896 & 26.7787 & 717.0977 & 41.84\% \\
+				\bottomrule
+			\end{tabular}%
+		}
+	\end{table}
 	
 	
 	\begin{figure}[h]
@@ -1722,19 +1722,19 @@ Although the current design still leaves room for stronger graph validation, exp
 		\label{fig:5.2}
 	\end{figure}
 	
-	The results show that graph-based residual refinement leads to a substantial improvement over the temporal-only model. Compared with T4, G1 reduces MAE from 33.4804 to 16.2106, corresponding to a 51.58\% reduction in absolute error. RMSE is also reduced from 51.9800 to 30.5118, while MSE decreases from 2701.9194 to 930.9674. This indicates that the temporal-only model still contains systematic zone-level errors that can be corrected by using spatial information from the taxi-zone graph.
+	The results show that graph-based residual refinement leads to a substantial improvement over the temporal-only model. Compared with T4, G1 reduces MAE from 24.5697 to 14.8361, corresponding to a 39.62\% reduction in absolute error. RMSE is also reduced from 39.8456 to 27.0384, while MSE decreases from 1587.6757 to 731.0762. This indicates that the temporal-only model still contains systematic zone-level errors that can be corrected by using spatial information from the taxi-zone graph.
 	
 	The improvement from T4 to G1 is the most important finding of this experiment. Since G1 differs from T4 only by the addition of the GraphSAGE residual refinement stage, the large reduction in error demonstrates that the graph structure provides useful information for correcting temporal predictions. This supports the assumption that taxi demand is not only temporally dependent, but also spatially coupled across zones. In other words, the demand error in one zone can be partially explained by patterns in neighbouring or flow-connected zones.
 	
-	Adding historical mean features in G2 produces only a very small additional improvement over G1. The MAE decreases from 16.2106 to 16.2040, which is an absolute reduction of only 0.0066. RMSE decreases from 30.5118 to 30.3489, and MSE decreases from 930.9674 to 921.0562. Although the direction of the change is positive, the difference between G1 and G2 is marginal. Therefore, the main performance gain should be attributed to graph-based residual learning rather than to the additional historical mean features.
+	Adding historical mean features in G2 produces only a very small additional improvement over G1. The MAE decreases from 14.8361 to 14.2896, which is an absolute reduction of only 0.5465. RMSE decreases from 27.0384 to 26.7787, and MSE decreases from 731.0762 to 717.0977. Although the direction of the change is positive, the difference between G1 and G2 is marginal. Therefore, the main performance gain should be attributed to graph-based residual learning rather than to the additional historical mean features.
 	
 	This result is reasonable because the base multi-scale temporal model has already encoded short-term, daily, weekly, and longer-term temporal patterns through its multi-branch architecture. As a result, simple historical averages such as \texttt{mean\_24h}, \texttt{mean\_168h}, and \texttt{mean\_720h} may provide partially redundant information to the GNN. These features describe the general demand level of each zone, but they do not necessarily capture complex temporal variations beyond what is already represented in the temporal prediction itself.
 	
-	The hourly results further support this conclusion. G1 improves over T4 in 23 out of 24 rolling target hours, while G2 improves over T4 in all 24 target hours. The average hourly MAE reduction is 45.48\% for G1 and 46.06\% for G2. The largest improvement occurs during the early morning hours, where the temporal-only model produces relatively large errors and the GNN correction is able to reduce them substantially. For example, at \texttt{2021-03-05 02:00:00}, the T4 MAE is 46.2276, while G1 reduces it to 5.5914 and G2 reduces it to 6.2358. This demonstrates that graph refinement is particularly effective when the temporal-only model makes large zone-level prediction errors.
+	The hourly results further support this conclusion. G1 improves over T4 in 23 out of 24 rolling target hours, while G2 improves over T4 in 23 out of 24 target hours. The average hourly MAE reduction is 31.03\% for G1 and 34.04\% for G2. The largest improvement occurs during the early morning hours, where the temporal-only model produces relatively large errors and the GNN correction is able to reduce them substantially. For example, at \texttt{2021-07-05 05:00:00}, the T4 MAE is 50.5888, while G1 reduces it to 11.0241 and G2 reduces it to 11.7685. This demonstrates that graph refinement is particularly effective when the temporal-only model makes large zone-level prediction errors.
 	
-	However, the comparison between G1 and G2 is mixed at the hourly level. G2 achieves lower MAE than G1 in 9 out of 24 target hours, while G1 performs better in the remaining 15 hours. This confirms that historical mean features do not provide a consistent advantage across all rolling steps. In some hours, these features slightly improve the GNN correction, while in others they may introduce redundant or weakly informative signals. Therefore, G2 can be interpreted as a minor extension of G1 rather than a fundamentally stronger model.
+	However, the comparison between G1 and G2 is mixed at the hourly level. G2 achieves lower MAE than G1 in 16 out of 24 target hours, while G1 performs better in the remaining 8 hours. This confirms that historical mean features do not provide a consistent advantage across all rolling steps. In some hours, these features slightly improve the GNN correction, while in others they may introduce redundant or weakly informative signals. Therefore, G2 can be interpreted as a minor extension of G1 rather than a fundamentally stronger model.
 	
-	The stability of the graph-refined models is also improved compared with the temporal-only baseline. The standard deviation of hourly MAE decreases from 12.9205 for T4 to 7.8025 for G1 and 7.7846 for G2. This suggests that graph refinement not only reduces the average prediction error, but also makes the rolling performance more stable across target hours. This is important for practical forecasting systems, where consistent performance is often as important as the average error.
+	The stability of the graph-refined models is also improved compared with the temporal-only baseline. The standard deviation of hourly MAE decreases from 10.0968 for T4 to 5.3693 for G1 and 5.2168 for G2. This suggests that graph refinement not only reduces the average prediction error, but also makes the rolling performance more stable across target hours. This is important for practical forecasting systems, where consistent performance is often as important as the average error.
 	
 	Overall, Experiment 2 demonstrates that graph-based residual refinement is highly effective for improving multi-zone taxi demand forecasting. The large performance gap between T4 and G1 confirms the value of introducing spatial structure after temporal prediction. The small difference between G1 and G2 suggests that historical mean features are only auxiliary and should not be treated as the main source of improvement. Therefore, the key conclusion from this experiment is:
 	\[
@@ -1742,74 +1742,84 @@ Although the current design still leaves room for stronger graph validation, exp
 	\]
 	That is, the main improvement comes from the GraphSAGE residual refinement stage, while the additional historical mean features provide only marginal extra benefit.
 	
-	\section{Experiment 3: Confidence-weighted GNN Ablation}
-	\label{subsec:experiment_3_confidence_weighted_gnn}
-	
-	This experiment evaluates whether the proposed confidence weighting strategy improves the GraphSAGE refinement stage. In Experiment 2, graph-based residual refinement was shown to provide a substantial improvement over the temporal-only model. However, the graph refinement model treats all training nodes equally unless additional weighting is introduced. In practice, not all taxi-zone predictions are equally reliable. Some zones have richer historical data, some predictions have lower MC Dropout uncertainty, and some zones are more consistent with their graph neighbours. Therefore, this experiment investigates whether these confidence signals can be used as sample weights during GNN residual learning.
-	
-	Five GNN variants are compared:
-	
-	\begin{itemize}
-		\item \textbf{GNN without confidence}: all nodes use equal sample weight, i.e. $w_i = 1$.
-		\item \textbf{GNN + prior only}: only the historical data sufficiency score is used as the node weight.
-		\item \textbf{GNN + stability only}: only the MC Dropout stability score is used as the node weight.
-		\item \textbf{GNN + neighbourhood only}: only the neighbourhood consistency score is used as the node weight.
-		\item \textbf{GNN + full confidence}: the final confidence score combines prior, stability, and neighbourhood consistency.
-	\end{itemize}
-	
-	The unweighted model is used as the baseline for this ablation. The purpose is not to compare against the temporal-only model again, but to isolate the effect of confidence weighting inside the GNN refinement stage. The same rolling target hours, taxi-zone graph, train/validation/test node split, and residual prediction setting are used for all variants.
-	
-	\begin{table}[H]
-		\centering
-		\caption{Experiment 3 results: confidence-weighted GNN ablation.}
-		\label{tab:experiment_3_confidence_ablation}
+\section{Experiment 3: Confidence-weighted GNN Ablation}
+\label{subsec:experiment_3_confidence_weighted_gnn}
+
+This experiment evaluates whether the proposed confidence weighting strategy improves the GraphSAGE refinement stage. In Experiment 2, graph-based residual refinement was shown to provide a substantial improvement over the temporal-only model. However, the graph refinement model treats all training nodes equally unless additional weighting is introduced. In practice, not all taxi-zone predictions are equally reliable. Some zones have richer historical data, some predictions have lower MC Dropout uncertainty, and some zones are more consistent with their graph neighbours. Therefore, this experiment investigates whether these confidence signals can be used as sample weights during GNN residual learning.
+
+Five GNN variants are compared:
+
+\begin{itemize}
+	\item \textbf{GNN without confidence}: all nodes use equal sample weight, i.e. $w_i = 1$.
+	\item \textbf{GNN + prior only}: only the historical data sufficiency score is used as the node weight.
+	\item \textbf{GNN + stability only}: only the MC Dropout stability score is used as the node weight.
+	\item \textbf{GNN + neighbourhood only}: only the neighbourhood consistency score is used as the node weight.
+	\item \textbf{GNN + full confidence}: the final confidence score combines prior, stability, and neighbourhood consistency.
+\end{itemize}
+
+The unweighted model is used as the baseline for this ablation. The purpose is not to compare against the temporal-only model again, but to isolate the effect of confidence weighting inside the GNN refinement stage. The same rolling target hours, taxi-zone graph, train/validation/test node split, and residual prediction setting are used for all variants.
+
+\begin{table}[H]
+	\centering
+	\caption{Experiment 3 results: confidence-weighted GNN ablation.}
+	\label{tab:experiment_3_confidence_ablation}
+	\resizebox{\textwidth}{!}{%
 		\begin{tabular}{lrrrr}
 			\toprule
-			\textbf{Model} & \textbf{MAE $\downarrow$} & \textbf{RMSE $\downarrow$} & \textbf{MSE $\downarrow$} & \textbf{Std. of Hourly MAE $\downarrow$} \\
+			\textbf{Model} 
+			& \textbf{MAE $\downarrow$} 
+			& \textbf{RMSE $\downarrow$} 
+			& \textbf{MSE $\downarrow$} 
+			& \textbf{Std. of Hourly MAE $\downarrow$} \\
 			\midrule
-			GNN without confidence & 16.6460 & 29.2035 & 852.8439 & 7.6376 \\
-			GNN + prior only & 16.7136 & 29.1922 & 852.1853 & 7.5131 \\
-			GNN + stability only & \textbf{16.4645} & \textbf{28.9847} & \textbf{840.1146} & 7.5475 \\
-			GNN + neighbourhood only & 16.5484 & 29.0987 & 846.7342 & \textbf{7.4499} \\
-			GNN + full confidence & 16.5793 & 29.1038 & 847.0323 & 7.4500 \\
+			GNN without confidence 
+			& 16.2119 & \textbf{27.5629} & \textbf{759.7154} & 5.2176 \\
+			GNN + prior only 
+			& 16.4318 & 28.3577 & 804.1575 & 5.1142 \\
+			GNN + stability only 
+			& \textbf{16.1758} & 27.8334 & 774.7002 & 4.9281 \\
+			GNN + neighbourhood only 
+			& 16.6498 & 28.2616 & 798.7170 & 4.7534 \\
+			GNN + full confidence 
+			& 16.2176 & 27.8559 & 775.9533 & \textbf{4.6287} \\
 			\bottomrule
-		\end{tabular}
-	\end{table}
-	
-	The results show that confidence weighting produces a moderate but meaningful effect on the GNN refinement stage. Compared with the unweighted GNN, the stability-only model achieves the best overall prediction accuracy. Its MAE decreases from 16.6460 to 16.4645, corresponding to an improvement of approximately 1.09\%. RMSE also decreases from 29.2035 to 28.9847, and MSE decreases from 852.8439 to 840.1146. This indicates that the MC Dropout stability score is the most effective individual confidence component for reducing average prediction error.
-	
-	
-	\begin{figure}[h]
-		\centering
-		\includegraphics[width=1\textwidth]{img/5.3.png}
-		\caption{Confidence-weighted GNN ablation results, comparing unweighted graph refinement with prior-only, stability-only, neighbourhood-only, and full confidence weighting strategies.}
-		\label{fig:5.3}
-	\end{figure}
-	
-	This result is consistent with the purpose of MC Dropout uncertainty estimation. A zone prediction with lower MC Dropout variance is more stable under stochastic forward passes, suggesting that the base temporal model is more confident about that prediction. When this stability score is used as a GNN sample weight, the residual refinement model gives more importance to reliable nodes and reduces the influence of uncertain predictions. Therefore, the stability-only result suggests that uncertainty-aware weighting can improve the learning of residual corrections.
-	
-	The prior-only setting does not improve MAE. Its MAE increases slightly from 16.6460 to 16.7136. This suggests that historical data sufficiency alone is not a sufficient indicator of prediction reliability. A zone with more historical records may still exhibit strong short-term volatility, and high-demand zones can still produce large forecasting errors. However, the prior-only model slightly improves RMSE, MSE, and the standard deviation of hourly MAE. This means that the prior score may help reduce some large-error fluctuations, but it is not strong enough to improve the average absolute error by itself.
-	
-	The neighbourhood-only setting performs better than the unweighted GNN across all reported metrics. Its MAE decreases from 16.6460 to 16.5484, while the standard deviation of hourly MAE decreases from 7.6376 to 7.4499. This is the lowest hourly MAE standard deviation among all tested variants. The result suggests that neighbourhood consistency is especially useful for stabilising rolling predictions. If a zone prediction strongly disagrees with its graph neighbours, it may be less reliable as a training signal for residual correction. Down-weighting such nodes helps the GNN produce more consistent performance across different target hours.
-	
-	The full confidence model combines prior, stability, and neighbourhood consistency. It improves all metrics compared with the unweighted GNN, reducing MAE from 16.6460 to 16.5793, RMSE from 29.2035 to 29.1038, and MSE from 852.8439 to 847.0323. It also reduces the standard deviation of hourly MAE from 7.6376 to 7.4500. However, the full confidence model does not achieve the best value on every metric. The stability-only model achieves the lowest MAE, RMSE, and MSE, while the neighbourhood-only model achieves the lowest hourly MAE standard deviation. Therefore, the full confidence strategy should be interpreted as a balanced weighting scheme rather than the strongest configuration for a single metric.
-	
-	The hourly comparison further supports this interpretation. Across the 24 rolling target hours, the stability-only model achieves the lowest hourly MAE in 11 hours, which is more frequent than any other variant. The unweighted GNN and the neighbourhood-only model each achieve the best hourly MAE in 4 hours, the prior-only model in 3 hours, and the full confidence model in 2 hours. This shows that the stability score is the most consistently effective signal for improving hourly accuracy, although neighbourhood-based weighting remains important for reducing error variability.
-	
-	Overall, Experiment 3 shows that the confidence module provides a robustness enhancement rather than a dramatic accuracy improvement. The large performance gain in the overall pipeline mainly comes from the graph-based residual refinement demonstrated in Experiment 2. Confidence weighting further refines this process by controlling how much each node contributes to GNN training. Among the confidence components, MC Dropout stability is the most useful for reducing average error, while neighbourhood consistency is the most useful for improving rolling stability. The full confidence model provides a compromise between these effects.
-	
-	The key conclusion from this experiment is therefore:
-	\[
-	\text{Stability-only: best average accuracy,}
-	\]
-	\[
-	\text{Neighbourhood-only: best rolling stability,}
-	\]
-	\[
-	\text{Full confidence: balanced improvement over unweighted GNN.}
-	\]
-	
-	This indicates that confidence weighting is useful, but its role should be described as improving robustness and stability rather than as the primary source of the overall error reduction.
+		\end{tabular}%
+	}
+\end{table}
+
+The results show that confidence weighting has a clearer effect on rolling stability than on average prediction accuracy. Compared with the unweighted GNN, the stability-only model achieves the lowest MAE, decreasing from 16.2119 to 16.1758. This corresponds to a small relative MAE reduction of approximately 0.22\%. However, the unweighted GNN still obtains the lowest RMSE and MSE, with values of 27.5629 and 759.7154 respectively. Therefore, confidence weighting should not be interpreted as uniformly improving all accuracy metrics. Instead, its main benefit is reflected in the reduction of hourly error variability.
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=1\textwidth]{img/5.3.png}
+	\caption{Confidence-weighted GNN ablation results, comparing unweighted graph refinement with prior-only, stability-only, neighbourhood-only, and full confidence weighting strategies.}
+	\label{fig:5.3}
+\end{figure}
+
+The stability-only setting provides the best average MAE among the confidence-weighted variants. This result is consistent with the purpose of MC Dropout uncertainty estimation. A zone prediction with lower MC Dropout variance is more stable under stochastic forward passes, suggesting that the base temporal model is more confident about that prediction. When this stability score is used as a GNN sample weight, the residual refinement model gives more importance to reliable nodes and reduces the influence of uncertain predictions. However, the increase in RMSE and MSE compared with the unweighted model suggests that stability weighting does not necessarily reduce larger squared errors.
+
+The prior-only setting does not improve average prediction accuracy. Its MAE increases from 16.2119 to 16.4318, while RMSE and MSE also increase to 28.3577 and 804.1575. This suggests that historical data sufficiency alone is not a sufficient indicator of prediction reliability. A zone with more historical observations may still exhibit strong short-term volatility, and high-demand zones can still produce large forecasting errors. Nevertheless, the prior-only setting reduces the standard deviation of hourly MAE from 5.2176 to 5.1142, indicating a small stability benefit.
+
+The neighbourhood-only setting produces the weakest average MAE among the five variants, increasing MAE to 16.6498. However, it substantially improves rolling stability, reducing the standard deviation of hourly MAE from 5.2176 to 4.7534. This supports the idea that neighbourhood consistency is more useful for stabilising graph refinement than for directly reducing average error. If a zone prediction strongly disagrees with its graph neighbours, it may be less reliable as a training signal for residual correction. Down-weighting such nodes can therefore reduce hour-to-hour fluctuation, even if it does not always improve the overall MAE.
+
+The full confidence model combines prior, stability, and neighbourhood consistency. Its MAE is 16.2176, which is very close to the unweighted GNN but slightly higher. Its RMSE and MSE are also higher than the unweighted model. However, it achieves the lowest standard deviation of hourly MAE, decreasing from 5.2176 to 4.6287. This corresponds to an improvement of approximately 11.29\% in rolling stability. Therefore, the full confidence strategy should be interpreted primarily as a stability-oriented weighting scheme rather than as the strongest configuration for average accuracy.
+
+The hourly comparison further supports this interpretation. Across the 24 rolling target hours, the stability-only model achieves the lowest hourly MAE in 10 hours, which is more frequent than any other variant. The neighbourhood-only model achieves the best hourly MAE in 5 hours, the full confidence model and the unweighted GNN each achieve the best hourly MAE in 4 hours, and the prior-only model achieves the best hourly MAE in 1 hour. This shows that the stability score is the most consistently effective individual signal for improving hourly MAE, while the full confidence score is more effective at reducing overall hourly error variation.
+
+Overall, Experiment 3 shows that the confidence module provides a robustness and stability enhancement rather than a dramatic accuracy improvement. The large performance gain in the overall pipeline mainly comes from the graph-based residual refinement demonstrated in Experiment 2. Confidence weighting further refines this process by controlling how much each node contributes to GNN training. Among the confidence components, MC Dropout stability is the most useful for reducing MAE, while the full confidence combination is the most useful for improving rolling stability.
+
+The key conclusion from this experiment is therefore:
+\[
+\text{Stability-only: lowest MAE,}
+\]
+\[
+\text{Unweighted GNN: lowest RMSE and MSE,}
+\]
+\[
+\text{Full confidence: best rolling stability.}
+\]
+
+This indicates that confidence weighting is useful, but its role should be described as improving robustness and temporal stability rather than as the primary source of overall error reduction.
 	
 	
 	\section{Experiment 4: Incremental Training in Rolling Forecasting}
@@ -1826,7 +1836,7 @@ Although the current design still leaves room for stronger graph validation, exp
 	
 	Both settings use the same multi-scale temporal architecture and the same GraphSAGE refinement stage. Therefore, the purpose of this experiment is not to prove the effectiveness of GNN refinement again, but to isolate the effect of incremental updating under the same rolling forecasting pipeline.
 	
-	The experiment is conducted over 24 rolling target hours on \texttt{2021-03-05}, from \texttt{00:00} to \texttt{23:00}. For each target hour, the base temporal prediction and the GNN-refined prediction are evaluated. The comparison includes both average error and rolling stability, measured by the standard deviation of hourly MAE.
+	The experiment is conducted over 24 rolling target hours on \texttt{2021-07-05}, from \texttt{00:00} to \texttt{23:00}. For each target hour, the base temporal prediction and the GNN-refined prediction are evaluated. The comparison includes both average error and rolling stability, measured by the standard deviation of hourly MAE.
 	
 	\begin{table}[H]
 		\centering

@@ -101,7 +101,7 @@
 \contentsline {section}{\numberline {5.5}Experiment 2: Effect of Graph-based Residual Refinement}{100}{section.5.5}%
 \contentsline {section}{\numberline {5.6}Experiment 3: Confidence-weighted GNN Ablation}{104}{section.5.6}%
 \contentsline {section}{\numberline {5.7}Experiment 4: Incremental Training in Rolling Forecasting}{108}{section.5.7}%
-\contentsline {section}{\numberline {5.8}Summary of Experimental Findings}{112}{section.5.8}%
+\contentsline {section}{\numberline {5.8}Summary of Experimental Findings}{111}{section.5.8}%
 \contentsline {chapter}{\numberline {6}Discussion}{114}{chapter.6}%
 \contentsline {section}{\numberline {6.1}Overview of the Main Findings}{114}{section.6.1}%
 \contentsline {section}{\numberline {6.2}Interpretation of the Multi-scale Temporal Model}{116}{section.6.2}%
