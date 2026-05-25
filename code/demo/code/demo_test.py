@@ -25,7 +25,7 @@ for f in os.listdir('.'):
 # # === 结束 ===
 
 
-MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", or "multiscale"
+MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", "multiscale", "sarima", or "tcn"
 
 if MODEL_BACKEND == "lstm":
     from persistent_lstm import ManagerConfig, PureLSTMModelManager as ModelManager
@@ -35,6 +35,10 @@ elif MODEL_BACKEND == "transformer":
     from persistent_transformer import ManagerConfig, PureTransformerModelManager as ModelManager
 elif MODEL_BACKEND == "multiscale":
     from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager as ModelManager
+elif MODEL_BACKEND == "sarima":
+    from persistent_sarima import ManagerConfig, SARIMAModelManager as ModelManager
+elif MODEL_BACKEND == "tcn":
+    from persistent_tcn import ManagerConfig, PureTCNModelManager as ModelManager
 else:
     raise ValueError(f"Unsupported MODEL_BACKEND: {MODEL_BACKEND}")
 

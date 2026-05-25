@@ -27,4 +27,3 @@
 \contentsline {figure}{\numberline {5.4}{\ignorespaces Effect of incremental training on rolling forecasting performance, comparing non-incremental checkpoint reuse with incremental updating for both the base temporal model and the GNN-refined model.}}{110}{figure.caption.33}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\addvspace {10\p@ }

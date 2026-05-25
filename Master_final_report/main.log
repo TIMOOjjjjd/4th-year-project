@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  6 MAY 2026 21:19
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  7 MAY 2026 13:07
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -2333,11 +2333,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[135]
-Appendix A.
-[136
-
-] [137
+[135] [136
 
 ]
 
@@ -2347,12 +2343,20 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[138]
-Overfull \hbox (22.77242pt too wide) in paragraph at lines 2124--2124
+[137]
+Overfull \hbox (22.77242pt too wide) in paragraph at lines 2122--2122
 \T1/lmr/m/n/12 line]. Avail-able: [][]$\T1/lmtt/m/n/12 https : / / papers . nip
 s . cc / paper / 6703 -[] inductive -[] representation -[]
  []
 
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[138]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2369,17 +2373,9 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [140]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 14.49998pt, for example:
-(fancyhdr)                \setlength{\headheight}{14.49998pt}.
-(fancyhdr)                You might also make \topmargin smaller:
-(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
-
-[141]
 Missing character: There is no č ("10D) in font ec-lmr12!
 
-Overfull \hbox (4.54793pt too wide) in paragraph at lines 2124--2124
+Overfull \hbox (4.54793pt too wide) in paragraph at lines 2122--2122
 []\T1/lmr/m/n/12 Y. Choi et al., ``Hi-er-ar-chi-cal uncertainty-aware graph neu
 -ral net-work,'' \T1/lmr/m/it/12 arXiv preprint
  []
@@ -2391,7 +2387,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[142]
+[141]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2399,13 +2395,20 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[143] (./main.aux)
+[142] (./main.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-03-20>
  ***********
-Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: C91434EC3EA6F30FA80DB15097F4717B;26711.
+
+
+Package rerunfilecheck Warning: File `main.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `main.out':
+(rerunfilecheck)             Before: C91434EC3EA6F30FA80DB15097F4717B;26711
+(rerunfilecheck)             After:  FB2F98A9BCF4EC0DA8B6C01955CDE8A4;26562.
 Package logreq Info: Writing requests to 'main.run.xml'.
 \openout1 = `main.run.xml'.
 
@@ -2417,6 +2420,6 @@ Here is how much of TeX's memory you used:
  52768 multiletter control sequences out of 15000+600000
  688901 words of font info for 81 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 69i,12n,79p,2122b,4969s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 69i,12n,79p,2122b,4971s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on main.pdf (153 pages).
+Output written on main.pdf (152 pages).
