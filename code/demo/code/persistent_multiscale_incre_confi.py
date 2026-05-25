@@ -141,6 +141,7 @@ class ManagerConfig:
     lambda_aux: float = 0.5
     K_mc_train: int = 5
     M_mc_test: int = 20
+    deterministic_predict: bool = True
 
 
 class MultiScaleModelManager:
@@ -485,10 +486,13 @@ class MultiScaleModelManager:
 
         model.eval()
         with torch.no_grad():
-            mean_scaled, _ = model.mc_predict(X_last, self.cfg.M_mc_test)
-        mean_np = mean_scaled.cpu().numpy()
+            if self.cfg.deterministic_predict:
+                pred_scaled, _ = model(X_last)
+            else:
+                pred_scaled, _ = model.mc_predict(X_last, self.cfg.M_mc_test)
+        mean_np = pred_scaled.cpu().numpy()
         pred = scaler.inverse_transform(mean_np)[0, 0]
-        return float(pred)
+        return float(max(0.0, pred))
 
     def predict_with_uncertainty(
         self, df: pd.DataFrame, zone_id: int, target_date: pd.Timestamp
@@ -518,7 +522,7 @@ class MultiScaleModelManager:
             "1w": embeddings[2].var(dim=0).mean().item(),
             "1m": embeddings[3].var(dim=0).mean().item(),
         }
-        return float(point), std_orig, branch_var
+        return float(max(0.0, point)), float(max(0.0, std_orig)), branch_var
 
     # ---------- orchestration ----------
     def train_and_predict_if_needed(
