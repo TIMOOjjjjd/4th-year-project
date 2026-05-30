@@ -387,7 +387,7 @@ def run_gnn_pipeline(
     device: torch.device,
     merged_csv_path: Optional[str] = None,
     zone_total_number: Optional[int] = None,
-    edge_weight_csv: str = "edge_weight_matrix_with_flow.csv",
+    edge_weight_csv: str = "edge_weight_matrix_od.csv",
     taxi_zone_lookup: str = "taxi-zone-lookup.csv",
     final_output_csv: Optional[str] = "final_predictions_multiscale.csv",
     predictions_df: Optional[pd.DataFrame] = None,

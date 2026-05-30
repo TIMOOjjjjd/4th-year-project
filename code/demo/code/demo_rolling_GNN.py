@@ -43,7 +43,7 @@ for f in os.listdir('.'):
 # =====================================================
 DATA_PATH = "data.parquet"
 LOOKUP_PATH = "taxi-zone-lookup.csv"
-EDGE_WEIGHT_MATRIX = "edge_weight_matrix_with_flow.csv"
+EDGE_WEIGHT_MATRIX = "edge_weight_matrix_od.csv"
 CHECKPOINT_DIR = f"checkpoints_{MODEL_BACKEND}"
 
 START_TARGET = pd.Timestamp("2021-03-05 00:00")
