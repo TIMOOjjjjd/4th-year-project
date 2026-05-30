@@ -10,7 +10,7 @@ import torch
 
 from gnn_model import run_gnn_pipeline
 
-MODEL_BACKEND = "lstm"  # "lstm", "gru", "transformer", or "multiscale"
+MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", or "multiscale"
 
 if MODEL_BACKEND == "lstm":
     from persistent_lstm import ManagerConfig, PureLSTMModelManager as MultiScaleModelManager
@@ -58,7 +58,7 @@ MC_DROPOUT_SAMPLES = 10
 HISTORY_WINDOWS = {
     "mean_24h": 24,
     "mean_168h": 24 * 7,
-    "mean_720h": 24 * 15,
+    "mean_720h": 24 * 30,
 }
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
 

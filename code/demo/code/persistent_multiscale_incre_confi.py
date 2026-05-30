@@ -141,7 +141,7 @@ class ManagerConfig:
     lambda_aux: float = 0.5
     K_mc_train: int = 5
     M_mc_test: int = 20
-    deterministic_predict: bool = True
+    deterministic_predict: bool = False
 
 
 class MultiScaleModelManager:
@@ -211,7 +211,7 @@ class MultiScaleModelManager:
         """Return dense hourly counts from [end_inclusive - sequence_length, end_inclusive]."""
         assert {"datetime", "PULocationID"} <= set(df.columns)
 
-        start_date = end_inclusive - pd.Timedelta(hours=800)
+        start_date = end_inclusive - pd.Timedelta(hours=1000)
         zone_df = df[df["PULocationID"] == zone_id].copy()
         hourly = zone_df.groupby("datetime").size().reset_index(name="passenger_count")
 
@@ -223,7 +223,7 @@ class MultiScaleModelManager:
             .rename_axis("datetime")
             .reset_index()
         )
-        hourly["passenger_count"] = hourly["passenger_count"].astype(float).fillna(0.0)
+        hourly["passenger_count"] = hourly["passenger_couwoyuont"].astype(float).fillna(0.0)
         return hourly
 
     def _fit_scaler_hist(self, hourly: pd.DataFrame, fit_until_exclusive: pd.Timestamp) -> MinMaxScaler:
