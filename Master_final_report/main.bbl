@@ -1895,6 +1895,58 @@
       \verb 10.1007/s40747-023-01324-9
       \endverb
     \endentry
+    \entry{Rong_2024}{article}{}{}
+      \name{author}{3}{}{%
+        {{hash=0e9e42e833d1ceae68e0bd1673a8d638}{%
+           family={Rong},
+           familyi={R\bibinitperiod},
+           given={Can},
+           giveni={C\bibinitperiod}}}%
+        {{hash=89c1436c9dd80b6c9a3864cc281480c8}{%
+           family={Ding},
+           familyi={D\bibinitperiod},
+           given={Jingtao},
+           giveni={J\bibinitperiod}}}%
+        {{hash=78be8ea0cb80e4e1b59bf06100942e90}{%
+           family={Li},
+           familyi={L\bibinitperiod},
+           given={Yong},
+           giveni={Y\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Association for Computing Machinery (ACM)}%
+      }
+      \strng{namehash}{47d9a6232c266765c646cdb1883b313e}
+      \strng{fullhash}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \strng{fullhashraw}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \strng{bibnamehash}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \strng{authorbibnamehash}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \strng{authornamehash}{47d9a6232c266765c646cdb1883b313e}
+      \strng{authorfullhash}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \strng{authorfullhashraw}{a99e4a25df3d3e2a7b80e4eea6c119ec}
+      \field{sortinit}{7}
+      \field{sortinithash}{108d0be1b1bee9773a1173443802c0a3}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{issn}{1557-7341}
+      \field{journaltitle}{ACM Computing Surveys}
+      \field{month}{10}
+      \field{number}{1}
+      \field{title}{An Interdisciplinary Survey on Origin-destination Flows Modeling: Theory and Techniques}
+      \field{volume}{57}
+      \field{year}{2024}
+      \field{pages}{1\bibrangedash 49}
+      \range{pages}{49}
+      \verb{doi}
+      \verb 10.1145/3682058
+      \endverb
+      \verb{urlraw}
+      \verb http://dx.doi.org/10.1145/3682058
+      \endverb
+      \verb{url}
+      \verb http://dx.doi.org/10.1145/3682058
+      \endverb
+    \endentry
     \entry{west2025weighted}{article}{}{}
       \true{moreauthor}
       \true{morelabelname}
@@ -2565,8 +2617,6 @@
       \field{year}{2017}
     \endentry
   \enddatalist
-  \missing{rong2024odsurvey}
-  \missing{wang2024od}
 \endrefsection
 \endinput
 

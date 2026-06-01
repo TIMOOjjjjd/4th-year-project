@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  7 MAY 2026 13:07
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.4.5)  1 JUN 2026 16:31
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -913,22 +913,7 @@ Package biblatex Info: Automatic encoding selection.
 Package biblatex Info: Trying to load bibliographic data...
 Package biblatex Info: ... file 'main.bbl' found.
 
-(./main.bbl
-
-Package biblatex Warning: The following entry could not be found
-(biblatex)                in the database:
-(biblatex)                rong2024odsurvey
-(biblatex)                Please verify the spelling and rerun
-(biblatex)                LaTeX afterwards.
-
-
-Package biblatex Warning: The following entry could not be found
-(biblatex)                in the database:
-(biblatex)                wang2024od
-(biblatex)                Please verify the spelling and rerun
-(biblatex)                LaTeX afterwards.
-
-)
+(./main.bbl)
 Package biblatex Info: Reference section=0 on input line 111.
 Package biblatex Info: Reference segment=0 on input line 111.
  [1
@@ -1207,10 +1192,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 
 [18]
 
-LaTeX Warning: Citation 'rong2024odsurvey' on page 19 undefined on input line 3
-39.
-
-
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
 (fancyhdr)                \setlength{\headheight}{14.49998pt}.
@@ -1218,9 +1199,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [19]
-
-LaTeX Warning: Citation 'wang2024od' on page 20 undefined on input line 345.
-
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2058,9 +2036,6 @@ File: img/5.3.png Graphic file (type bmp)
 <img/5.3.png>
 
 
-LaTeX Warning: `h' float specifier changed to `ht'.
-
-
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
 (fancyhdr)                \setlength{\headheight}{14.49998pt}.
@@ -2084,7 +2059,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [107]
-Overfull \hbox (6.53699pt too wide) in paragraph at lines 1833--1834
+Overfull \hbox (6.53699pt too wide) in paragraph at lines 1823--1824
 []\T1/lmr/bx/n/12 Non-incremental train-ing\T1/lmr/m/n/12 : the tem-po-ral mode
 l is trained and then reused through
  []
@@ -2099,9 +2074,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 [108]
 File: img/5.4.png Graphic file (type bmp)
 <img/5.4.png>
-
-
-LaTeX Warning: `h' float specifier changed to `ht'.
 
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
@@ -2119,25 +2091,17 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [110]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 14.49998pt, for example:
-(fancyhdr)                \setlength{\headheight}{14.49998pt}.
-(fancyhdr)                You might also make \topmargin smaller:
-(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
-
-[111]
-Underfull \hbox (badness 3884) in paragraph at lines 1906--1907
+Underfull \hbox (badness 3884) in paragraph at lines 1896--1897
 \T1/lmr/m/n/12 pro-duces the largest im-prove-
  []
 
 
-Underfull \hbox (badness 1259) in paragraph at lines 1908--1909
+Underfull \hbox (badness 1259) in paragraph at lines 1898--1899
 \T1/lmr/m/n/12 age ac-cu-racy, while neigh-bour-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1910--1911
+Underfull \hbox (badness 10000) in paragraph at lines 1900--1901
 []|\T1/lmr/m/n/12 Incremental train-ing im-proves
  []
 
@@ -2148,7 +2112,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[112]
+[111]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2156,9 +2120,9 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[113]
+[112]
 Chapter 6.
-[114
+[113
 
 ]
 
@@ -2168,11 +2132,19 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[115]
-Overfull \hbox (4.47437pt too wide) in paragraph at lines 1938--1938
+[114]
+Overfull \hbox (4.47437pt too wide) in paragraph at lines 1928--1928
 []\T1/lmr/bx/n/17.28 Interpretation of the Multi-scale Tem-po-ral Model 
  []
 
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[115]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2301,19 +2273,11 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [131]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 14.49998pt, for example:
-(fancyhdr)                \setlength{\headheight}{14.49998pt}.
-(fancyhdr)                You might also make \topmargin smaller:
-(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
-
-[132]
 Chapter 7.
-[133
+[132
 
 ]
-Overfull \hbox (4.36836pt too wide) in paragraph at lines 2108--2109
+Overfull \hbox (4.36836pt too wide) in paragraph at lines 2098--2099
 \T1/lmr/m/n/12 multi-scale tem-po-ral pre-dic-tion, graph-based resid-ual re-fi
 ne-ment, confidence-aware weight-
  []
@@ -2325,7 +2289,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[134]
+[133]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2333,7 +2297,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[135] [136
+[134] [135
 
 ]
 
@@ -2343,12 +2307,20 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[137]
-Overfull \hbox (22.77242pt too wide) in paragraph at lines 2122--2122
+[136]
+Overfull \hbox (22.77242pt too wide) in paragraph at lines 2112--2112
 \T1/lmr/m/n/12 line]. Avail-able: [][]$\T1/lmtt/m/n/12 https : / / papers . nip
 s . cc / paper / 6703 -[] inductive -[] representation -[]
  []
 
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller:
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[137]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2365,6 +2337,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [139]
+Missing character: There is no č ("10D) in font ec-lmr12!
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 14.49998pt, for example:
@@ -2373,9 +2346,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [140]
-Missing character: There is no č ("10D) in font ec-lmr12!
-
-Overfull \hbox (4.54793pt too wide) in paragraph at lines 2122--2122
+Overfull \hbox (4.54793pt too wide) in paragraph at lines 2112--2112
 []\T1/lmr/m/n/12 Y. Choi et al., ``Hi-er-ar-chi-cal uncertainty-aware graph neu
 -ral net-work,'' \T1/lmr/m/it/12 arXiv preprint
  []
@@ -2387,39 +2358,24 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                You might also make \topmargin smaller:
 (fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
-[141]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 14.49998pt, for example:
-(fancyhdr)                \setlength{\headheight}{14.49998pt}.
-(fancyhdr)                You might also make \topmargin smaller:
-(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
-
-[142] (./main.aux)
+[141] (./main.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-03-20>
  ***********
-
-
-Package rerunfilecheck Warning: File `main.out' has changed.
-(rerunfilecheck)                Rerun to get outlines right
-(rerunfilecheck)                or use package `bookmark'.
-
-Package rerunfilecheck Info: Checksums for `main.out':
-(rerunfilecheck)             Before: C91434EC3EA6F30FA80DB15097F4717B;26711
-(rerunfilecheck)             After:  FB2F98A9BCF4EC0DA8B6C01955CDE8A4;26562.
+Package rerunfilecheck Info: File `main.out' has not changed.
+(rerunfilecheck)             Checksum: FB2F98A9BCF4EC0DA8B6C01955CDE8A4;26562.
 Package logreq Info: Writing requests to 'main.run.xml'.
 \openout1 = `main.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 24185 strings out of 467992
- 434150 string characters out of 5433178
- 1320058 words of memory out of 5000000
- 52768 multiletter control sequences out of 15000+600000
+ 24188 strings out of 467992
+ 434290 string characters out of 5433178
+ 1319889 words of memory out of 5000000
+ 52771 multiletter control sequences out of 15000+600000
  688901 words of font info for 81 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
  69i,12n,79p,2122b,4971s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on main.pdf (152 pages).
+Output written on main.pdf (151 pages).

@@ -102,14 +102,14 @@
 \contentsline {section}{\numberline {5.6}Experiment 3: Confidence-weighted GNN Ablation}{104}{section.5.6}%
 \contentsline {section}{\numberline {5.7}Experiment 4: Incremental Training in Rolling Forecasting}{108}{section.5.7}%
 \contentsline {section}{\numberline {5.8}Summary of Experimental Findings}{111}{section.5.8}%
-\contentsline {chapter}{\numberline {6}Discussion}{114}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Overview of the Main Findings}{114}{section.6.1}%
-\contentsline {section}{\numberline {6.2}Interpretation of the Multi-scale Temporal Model}{116}{section.6.2}%
-\contentsline {section}{\numberline {6.3}Interpretation of Graph-based Residual Refinement}{119}{section.6.3}%
-\contentsline {section}{\numberline {6.4}Interpretation of Confidence Weighting}{121}{section.6.4}%
-\contentsline {section}{\numberline {6.5}Interpretation of Incremental Training}{124}{section.6.5}%
-\contentsline {section}{\numberline {6.6}Practical Implications}{126}{section.6.6}%
-\contentsline {section}{\numberline {6.7}Limitations}{128}{section.6.7}%
-\contentsline {section}{\numberline {6.8}Future Work}{130}{section.6.8}%
-\contentsline {section}{\numberline {6.9}Concluding Discussion}{131}{section.6.9}%
-\contentsline {chapter}{\numberline {7}Conclusion}{133}{chapter.7}%
+\contentsline {chapter}{\numberline {6}Discussion}{113}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Overview of the Main Findings}{113}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Interpretation of the Multi-scale Temporal Model}{115}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Interpretation of Graph-based Residual Refinement}{118}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Interpretation of Confidence Weighting}{120}{section.6.4}%
+\contentsline {section}{\numberline {6.5}Interpretation of Incremental Training}{123}{section.6.5}%
+\contentsline {section}{\numberline {6.6}Practical Implications}{125}{section.6.6}%
+\contentsline {section}{\numberline {6.7}Limitations}{127}{section.6.7}%
+\contentsline {section}{\numberline {6.8}Future Work}{129}{section.6.8}%
+\contentsline {section}{\numberline {6.9}Concluding Discussion}{130}{section.6.9}%
+\contentsline {chapter}{\numberline {7}Conclusion}{132}{chapter.7}%
