@@ -211,7 +211,7 @@ class MultiScaleModelManager:
         """Return dense hourly counts from [end_inclusive - sequence_length, end_inclusive]."""
         assert {"datetime", "PULocationID"} <= set(df.columns)
 
-        start_date = end_inclusive - pd.Timedelta(hours=1000)
+        start_date = end_inclusive - pd.Timedelta(hours=800)
         zone_df = df[df["PULocationID"] == zone_id].copy()
         hourly = zone_df.groupby("datetime").size().reset_index(name="passenger_count")
 
@@ -223,7 +223,7 @@ class MultiScaleModelManager:
             .rename_axis("datetime")
             .reset_index()
         )
-        hourly["passenger_count"] = hourly["passenger_couwoyuont"].astype(float).fillna(0.0)
+        hourly["passenger_count"] = hourly["passenger_count"].astype(float).fillna(0.0)
         return hourly
 
     def _fit_scaler_hist(self, hourly: pd.DataFrame, fit_until_exclusive: pd.Timestamp) -> MinMaxScaler:
@@ -550,6 +550,5 @@ def _prepare_df_from_parquet(parquet_path: str) -> pd.DataFrame:
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
     df["datetime"] = df["pickup_datetime"].dt.floor("H")
     return df
-
 
 
