@@ -59,6 +59,7 @@ HISTORY_WINDOWS = {
     "mean_720h": 720,
 }
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
+HISTORY_CONSISTENCY_TAU = 1.0
 
 MODEL_SPECS = {
     "T4": {
@@ -259,35 +260,6 @@ def compute_history_means(
     return means
 
 
-def build_zone_adjacency(edge_csv: Path, lookup_df: pd.DataFrame) -> Dict[int, List[int]]:
-    """Create LocationID adjacency lists from positive OD-flow edges."""
-
-    df_adj = pd.read_csv(edge_csv, index_col=0)
-    df_adj.index = [str(idx).lstrip("\ufeff") for idx in df_adj.index]
-    df_adj.columns = [str(col).lstrip("\ufeff") for col in df_adj.columns]
-    df_adj = df_adj.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-
-    lookup_by_zone = lookup_df.drop_duplicates(subset="Zone")
-    zone_to_location = dict(zip(lookup_by_zone["Zone"], lookup_by_zone["LocationID"]))
-
-    adjacency: Dict[int, List[int]] = {}
-    for zone_name in df_adj.index:
-        loc_id = zone_to_location.get(zone_name)
-        if loc_id is None or pd.isna(loc_id):
-            continue
-
-        neighbors: List[int] = []
-        for neighbor_zone, weight in df_adj.loc[zone_name].items():
-            if float(weight) <= 0.0:
-                continue
-            neighbor_loc = zone_to_location.get(neighbor_zone)
-            if neighbor_loc is None or pd.isna(neighbor_loc):
-                continue
-            neighbors.append(int(neighbor_loc))
-        adjacency[int(loc_id)] = neighbors
-    return adjacency
-
-
 def compute_prior_scores(history_df: pd.DataFrame) -> Dict[int, float]:
     """Higher scores for zones with richer past history."""
 
@@ -326,36 +298,24 @@ def compute_stability_scores(step_df: pd.DataFrame) -> Dict[int, float]:
     return scores
 
 
-def compute_neighborhood_scores(
-    step_df: pd.DataFrame,
-    adjacency: Dict[int, List[int]],
-) -> Dict[int, float]:
-    """Compare each base prediction to neighboring zones' base predictions."""
-
-    pred_map = {
-        int(row.PULocationID): float(row.base_pred)
-        for row in step_df.itertuples()
-        if np.isfinite(row.base_pred)
-    }
-    if not pred_map:
-        return {}
-
-    all_preds = np.array(list(pred_map.values()), dtype=np.float32)
-    global_scale = float(np.percentile(np.abs(all_preds), 75)) + 1.0
-
+def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float]:
+    """Higher scores when 24h/168h/720h historical means agree."""
     scores: Dict[int, float] = {}
-    for zone_id, pred in pred_map.items():
-        neighbors = adjacency.get(zone_id, [])
-        neighbor_preds = [pred_map[n] for n in neighbors if n in pred_map]
-        if not neighbor_preds:
-            scores[zone_id] = 0.6
+    for row in step_df.itertuples():
+        values = []
+        for feature_name in HISTORY_FEATURES:
+            value = float(getattr(row, feature_name, np.nan))
+            if np.isfinite(value):
+                values.append(max(value, 0.0))
+
+        zone_id = int(row.PULocationID)
+        if len(values) < 2:
+            scores[zone_id] = 0.5
             continue
 
-        neighbor_array = np.array(neighbor_preds, dtype=np.float32)
-        mu = float(neighbor_array.mean())
-        sigma = float(neighbor_array.std())
-        denom = sigma + 0.1 * abs(mu) + global_scale
-        raw = float(np.exp(-abs(pred - mu) / max(denom, 1e-3)))
+        log_values = np.log1p(np.array(values, dtype=np.float32))
+        dispersion = float(log_values.std())
+        raw = float(np.exp(-dispersion / HISTORY_CONSISTENCY_TAU))
         scores[zone_id] = float(np.clip(raw, 0.05, 1.0))
     return scores
 
@@ -363,16 +323,16 @@ def compute_neighborhood_scores(
 def combine_confidence_components(
     prior: float,
     stability: float,
-    neighborhood: float,
+    history_consistency: float,
     weights: Dict[str, float],
 ) -> float:
     prior_c = np.clip(prior, 0.05, 1.0)
     stability_c = np.clip(stability, 0.05, 1.0)
-    neighborhood_c = np.clip(neighborhood, 0.05, 1.0)
+    history_c = np.clip(history_consistency, 0.05, 1.0)
     log_score = (
         weights["prior"] * np.log(prior_c)
         + weights["stability"] * np.log(stability_c)
-        + weights["neighborhood"] * np.log(neighborhood_c)
+        + weights["history_consistency"] * np.log(history_c)
     )
     return float(np.clip(np.exp(log_score), 0.05, 1.0))
 
@@ -380,11 +340,10 @@ def combine_confidence_components(
 def assign_confidence_scores(
     step_df: pd.DataFrame,
     prior_scores: Dict[int, float],
-    adjacency: Dict[int, List[int]],
 ) -> Dict[int, float]:
     stability_scores = compute_stability_scores(step_df)
-    neighborhood_scores = compute_neighborhood_scores(step_df, adjacency)
-    weights = {"prior": 0.3, "stability": 0.4, "neighborhood": 0.3}
+    history_scores = compute_history_consistency_scores(step_df)
+    weights = {"prior": 0.3, "stability": 0.4, "history_consistency": 0.3}
 
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
@@ -396,11 +355,14 @@ def assign_confidence_scores(
         combined = combine_confidence_components(
             prior=prior_scores.get(zone_id, 0.4),
             stability=stability_scores.get(zone_id, 0.5),
-            neighborhood=neighborhood_scores.get(zone_id, 0.6),
+            history_consistency=history_scores.get(zone_id, 0.6),
             weights=weights,
         )
         zone_confidence[zone_id] = combined
 
+    step_df["history_consistency_score"] = step_df["PULocationID"].map(
+        lambda zone_id: history_scores.get(int(zone_id), 0.6)
+    )
     step_df["confidence"] = step_df["PULocationID"].map(
         lambda zone_id: zone_confidence.get(int(zone_id), 0.2)
     )
@@ -414,7 +376,6 @@ def run_multiscale_temporal_baseline(
     zones: Sequence[int],
     zone_hourly_counts: pd.Series,
     prior_scores: Dict[int, float],
-    adjacency: Dict[int, List[int]],
 ) -> pd.DataFrame:
     """Generate base_pred using persistent_multiscale_confi.py only."""
 
@@ -458,7 +419,7 @@ def run_multiscale_temporal_baseline(
             )
 
     step_df = pd.DataFrame(records)
-    assign_confidence_scores(step_df, prior_scores, adjacency)
+    assign_confidence_scores(step_df, prior_scores)
     return step_df
 
 
@@ -899,7 +860,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
 
-    df, lookup_df, graph = load_required_data(
+    df, _lookup_df, graph = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
@@ -907,7 +868,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     )
     zones = select_zones(df, args.max_zones)
     zone_hourly_counts = build_zone_hourly_counts(df)
-    adjacency = build_zone_adjacency(args.edge_csv, lookup_df)
 
     manager_cfg = ManagerConfig(M_mc_test=args.mc_samples)
     manager = MultiScaleModelManager(checkpoint_dir=str(args.checkpoint_dir), cfg=manager_cfg)
@@ -935,7 +895,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             zones=zones,
             zone_hourly_counts=zone_hourly_counts,
             prior_scores=prior_scores,
-            adjacency=adjacency,
         )
 
         data_g1 = build_gnn_features_g1(step_df, graph)

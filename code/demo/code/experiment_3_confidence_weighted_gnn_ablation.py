@@ -15,8 +15,8 @@ Compared modes:
     none: no confidence weighting
     prior_only: historical-data prior only
     stability_only: MC-variance stability only
-    neighbourhood_only: OD-neighbour prediction consistency only
-    full: fixed prior/stability/neighbourhood weights from Experiment 2
+    history_consistency_only: 24h/168h/720h historical mean consistency only
+    full: fixed prior/stability/history-consistency weights from Experiment 2
 """
 
 from __future__ import annotations
@@ -69,11 +69,12 @@ HISTORY_WINDOWS = {
     "mean_720h": 720,
 }
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
+HISTORY_CONSISTENCY_TAU = 1.0
 
 CONFIDENCE_WEIGHTS = {
     "prior": 0.3,
     "stability": 0.4,
-    "neighbourhood": 0.3,
+    "history_consistency": 0.3,
 }
 
 ABLATION_MODES = {
@@ -89,14 +90,14 @@ ABLATION_MODES = {
         "model": "GNN + stability only",
         "description": "only use MC Dropout stability score as sample weight",
     },
-    "neighbourhood_only": {
-        "model": "GNN + neighbourhood only",
-        "description": "only use neighbourhood consistency score as sample weight",
+    "history_consistency_only": {
+        "model": "GNN + history consistency only",
+        "description": "only use 24h/168h/720h consistency score as sample weight",
     },
     "full": {
         "model": "GNN + fixed full confidence",
         "description": (
-            "use fixed log-space prior/stability/neighbourhood weights "
+            "use fixed log-space prior/stability/history-consistency weights "
             "0.3/0.4/0.3"
         ),
     },
@@ -105,7 +106,7 @@ MODE_ORDER = [
     "none",
     "prior_only",
     "stability_only",
-    "neighbourhood_only",
+    "history_consistency_only",
     "full",
 ]
 
@@ -312,35 +313,6 @@ def compute_history_means(
     return means
 
 
-def build_zone_adjacency(edge_csv: Path, lookup_df: pd.DataFrame) -> Dict[int, List[int]]:
-    """Create LocationID adjacency lists from positive OD-flow edges."""
-
-    df_adj = pd.read_csv(edge_csv, index_col=0)
-    df_adj.index = [str(idx).lstrip("\ufeff") for idx in df_adj.index]
-    df_adj.columns = [str(col).lstrip("\ufeff") for col in df_adj.columns]
-    df_adj = df_adj.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-
-    lookup_by_zone = lookup_df.drop_duplicates(subset="Zone")
-    zone_to_location = dict(zip(lookup_by_zone["Zone"], lookup_by_zone["LocationID"]))
-
-    adjacency: Dict[int, List[int]] = {}
-    for zone_name in df_adj.index:
-        loc_id = zone_to_location.get(zone_name)
-        if loc_id is None or pd.isna(loc_id):
-            continue
-
-        neighbors: List[int] = []
-        for neighbor_zone, weight in df_adj.loc[zone_name].items():
-            if float(weight) <= 0.0:
-                continue
-            neighbor_loc = zone_to_location.get(neighbor_zone)
-            if neighbor_loc is None or pd.isna(neighbor_loc):
-                continue
-            neighbors.append(int(neighbor_loc))
-        adjacency[int(loc_id)] = neighbors
-    return adjacency
-
-
 def run_multiscale_temporal_baseline(
     df: pd.DataFrame,
     manager: MultiScaleModelManager,
@@ -457,36 +429,24 @@ def compute_stability_scores(step_df: pd.DataFrame) -> Dict[int, float]:
     return scores
 
 
-def compute_neighbourhood_scores(
-    step_df: pd.DataFrame,
-    adjacency: Dict[int, List[int]],
-) -> Dict[int, float]:
-    """Neighbourhood confidence from base prediction consistency with neighbors."""
-
-    pred_map = {
-        int(row.PULocationID): float(row.base_pred)
-        for row in step_df.itertuples()
-        if np.isfinite(row.base_pred)
-    }
-    if not pred_map:
-        return {}
-
-    all_preds = np.array(list(pred_map.values()), dtype=np.float32)
-    global_scale = float(np.percentile(np.abs(all_preds), 75)) + 1.0
-
+def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float]:
+    """History confidence: higher when 24h/168h/720h means agree."""
     scores: Dict[int, float] = {}
-    for zone_id, pred in pred_map.items():
-        neighbors = adjacency.get(zone_id, [])
-        neighbor_preds = [pred_map[n] for n in neighbors if n in pred_map]
-        if not neighbor_preds:
-            scores[zone_id] = 0.6
+    for row in step_df.itertuples():
+        values = []
+        for feature_name in HISTORY_FEATURES:
+            value = float(getattr(row, feature_name, np.nan))
+            if np.isfinite(value):
+                values.append(max(value, 0.0))
+
+        zone_id = int(row.PULocationID)
+        if len(values) < 2:
+            scores[zone_id] = 0.5
             continue
 
-        neighbor_array = np.array(neighbor_preds, dtype=np.float32)
-        mu = float(neighbor_array.mean())
-        sigma = float(neighbor_array.std())
-        denom = sigma + 0.1 * abs(mu) + global_scale
-        raw = float(np.exp(-abs(pred - mu) / max(denom, 1e-3)))
+        log_values = np.log1p(np.array(values, dtype=np.float32))
+        dispersion = float(log_values.std())
+        raw = float(np.exp(-dispersion / HISTORY_CONSISTENCY_TAU))
         scores[zone_id] = clamp_score(raw, default=0.6)
     return scores
 
@@ -494,7 +454,6 @@ def compute_neighbourhood_scores(
 def compute_confidence_components(
     step_df: pd.DataFrame,
     history_df: pd.DataFrame,
-    adjacency: Dict[int, List[int]],
 ) -> pd.DataFrame:
     """Attach confidence components needed by the ablation.
 
@@ -507,7 +466,7 @@ def compute_confidence_components(
     step_df = step_df.copy()
     prior_scores = compute_prior_scores(history_df)
     stability_scores = compute_stability_scores(step_df)
-    neighbourhood_scores = compute_neighbourhood_scores(step_df, adjacency)
+    history_scores = compute_history_consistency_scores(step_df)
 
     step_df["prior_score"] = step_df["PULocationID"].map(
         lambda zone_id: clamp_score(prior_scores.get(int(zone_id), 0.4), default=0.4)
@@ -515,9 +474,9 @@ def compute_confidence_components(
     step_df["stability_score"] = step_df["PULocationID"].map(
         lambda zone_id: clamp_score(stability_scores.get(int(zone_id), 0.5), default=0.5)
     )
-    step_df["neighbourhood_score"] = step_df["PULocationID"].map(
+    step_df["history_consistency_score"] = step_df["PULocationID"].map(
         lambda zone_id: clamp_score(
-            neighbourhood_scores.get(int(zone_id), 0.6),
+            history_scores.get(int(zone_id), 0.6),
             default=0.6,
         )
     )
@@ -526,8 +485,8 @@ def compute_confidence_components(
             CONFIDENCE_WEIGHTS["prior"] * np.log(step_df["prior_score"].clip(0.05, 1.0))
             + CONFIDENCE_WEIGHTS["stability"]
             * np.log(step_df["stability_score"].clip(0.05, 1.0))
-            + CONFIDENCE_WEIGHTS["neighbourhood"]
-            * np.log(step_df["neighbourhood_score"].clip(0.05, 1.0))
+            + CONFIDENCE_WEIGHTS["history_consistency"]
+            * np.log(step_df["history_consistency_score"].clip(0.05, 1.0))
         )
     ).map(lambda value: clamp_score(float(value), default=0.5))
     return step_df
@@ -551,7 +510,7 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     history_tensor = torch.full((node_count, len(HISTORY_FEATURES)), 0.0)
     prior = torch.full((node_count,), 0.4, dtype=torch.float32)
     stability = torch.full((node_count,), 0.5, dtype=torch.float32)
-    neighbourhood = torch.full((node_count,), 0.6, dtype=torch.float32)
+    history_consistency = torch.full((node_count,), 0.6, dtype=torch.float32)
     full_confidence = torch.full((node_count,), 0.5, dtype=torch.float32)
     location_id = torch.full((node_count,), -1, dtype=torch.long)
 
@@ -569,7 +528,10 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
         location_id[node_idx] = loc_id
         prior[node_idx] = clamp_score(float(row.prior_score), default=0.4)
         stability[node_idx] = clamp_score(float(row.stability_score), default=0.5)
-        neighbourhood[node_idx] = clamp_score(float(row.neighbourhood_score), default=0.6)
+        history_consistency[node_idx] = clamp_score(
+            float(row.history_consistency_score),
+            default=0.6,
+        )
         full_confidence[node_idx] = clamp_score(float(row.full_confidence), default=0.5)
         for idx, feature_name in enumerate(HISTORY_FEATURES):
             value = getattr(row, feature_name, 0.0)
@@ -585,7 +547,7 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     history_tensor = history_tensor[valid_indices]
     prior = prior[valid_indices]
     stability = stability[valid_indices]
-    neighbourhood = neighbourhood[valid_indices]
+    history_consistency = history_consistency[valid_indices]
     full_confidence = full_confidence[valid_indices]
     location_id = location_id[valid_indices]
 
@@ -607,7 +569,7 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
         location_id=location_id,
         prior_score=prior,
         stability_score=stability,
-        neighbourhood_score=neighbourhood,
+        history_consistency_score=history_consistency,
         full_confidence=full_confidence,
     )
 
@@ -640,8 +602,8 @@ def get_sample_weights(mode: str, data: Data) -> torch.Tensor:
         weights = data.prior_score
     elif mode == "stability_only":
         weights = data.stability_score
-    elif mode == "neighbourhood_only":
-        weights = data.neighbourhood_score
+    elif mode == "history_consistency_only":
+        weights = data.history_consistency_score
     elif mode == "full":
         weights = data.full_confidence
     else:
@@ -825,7 +787,7 @@ def collect_node_predictions(
             "sample_weight": sample_weight.cpu().numpy(),
             "prior_score": data.prior_score.cpu().numpy(),
             "stability_score": data.stability_score.cpu().numpy(),
-            "neighbourhood_score": data.neighbourhood_score.cpu().numpy(),
+            "history_consistency_score": data.history_consistency_score.cpu().numpy(),
             "full_confidence": data.full_confidence.cpu().numpy(),
             "best_epoch": result.best_epoch,
             "best_val_loss": result.best_val_loss,
@@ -920,7 +882,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
 
-    df, lookup_df, graph = load_required_data(
+    df, _lookup_df, graph = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
@@ -930,7 +892,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Graph-compatible zones selected:", len(zones))
 
     zone_hourly_counts = build_zone_hourly_counts(df)
-    adjacency = build_zone_adjacency(args.edge_csv, lookup_df)
 
     manager_cfg = ManagerConfig(M_mc_test=args.mc_samples)
     manager = MultiScaleModelManager(checkpoint_dir=str(args.checkpoint_dir), cfg=manager_cfg)
@@ -960,7 +921,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         step_df = compute_confidence_components(
             step_df=baseline_df,
             history_df=history_df,
-            adjacency=adjacency,
         )
         data = build_gnn_features(step_df=step_df, graph=graph)
         splits = make_node_splits(
