@@ -10,7 +10,7 @@ All modes keep the same residual refinement formulation:
 
 The compared confidence weight modes are:
 
-    fixed: fixed prior/stability/neighbourhood weights, 0.3/0.4/0.3
+    fixed: fixed prior/stability/history-consistency weights, 0.3/0.4/0.3
     grid_search: validation-selected simplex grid weights
     random_search: validation-selected Dirichlet random weights
     learned_softmax: trainable softmax component weights
@@ -42,15 +42,18 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     START_TARGET,
     GNNResult,
     GNNTrainingConfig,
+    GraphContext,
+    HISTORY_FEATURES,
     SplitMasks,
-    build_zone_adjacency,
     build_zone_hourly_counts,
+    clamp_score,
     clean_checkpoint_dir,
-    build_gnn_features,
-    compute_confidence_components,
+    compute_prior_scores,
+    compute_stability_scores,
     evaluate_refined_predictions,
     load_required_data,
     make_node_splits,
+    remap_edges_to_valid_nodes,
     run_multiscale_temporal_baseline,
     select_zones,
     set_random_seed,
@@ -59,9 +62,10 @@ from gnn_model import MultiScaleGraphSAGE
 from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
 
 
-COMPONENT_NAMES = ("prior", "stability", "neighbourhood")
+COMPONENT_NAMES = ("prior", "stability", "history_consistency")
 FIXED_WEIGHTS = np.array([0.3, 0.4, 0.3], dtype=np.float32)
 DEFAULT_OPT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
+HISTORY_CONSISTENCY_TAU = 1.0
 
 MODE_SPECS = {
     "fixed": {
@@ -156,12 +160,136 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float]:
+    """History confidence: higher when 24h/168h/720h means agree."""
+    scores: Dict[int, float] = {}
+    for row in step_df.itertuples():
+        values = []
+        for feature_name in HISTORY_FEATURES:
+            value = float(getattr(row, feature_name, np.nan))
+            if np.isfinite(value):
+                values.append(max(value, 0.0))
+
+        zone_id = int(row.PULocationID)
+        if len(values) < 2:
+            scores[zone_id] = 0.5
+            continue
+
+        log_values = np.log1p(np.array(values, dtype=np.float32))
+        dispersion = float(log_values.std())
+        raw = float(np.exp(-dispersion / HISTORY_CONSISTENCY_TAU))
+        scores[zone_id] = clamp_score(raw, default=0.6)
+    return scores
+
+
+def compute_confidence_components(
+    step_df: pd.DataFrame,
+    history_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach the three confidence components used by Experiment 4."""
+    step_df = step_df.copy()
+    prior_scores = compute_prior_scores(history_df)
+    stability_scores = compute_stability_scores(step_df)
+    history_scores = compute_history_consistency_scores(step_df)
+
+    step_df["prior_score"] = step_df["PULocationID"].map(
+        lambda zone_id: clamp_score(prior_scores.get(int(zone_id), 0.4), default=0.4)
+    )
+    step_df["stability_score"] = step_df["PULocationID"].map(
+        lambda zone_id: clamp_score(stability_scores.get(int(zone_id), 0.5), default=0.5)
+    )
+    step_df["history_consistency_score"] = step_df["PULocationID"].map(
+        lambda zone_id: clamp_score(history_scores.get(int(zone_id), 0.6), default=0.6)
+    )
+    step_df["full_confidence"] = (
+        np.exp(
+            FIXED_WEIGHTS[0] * np.log(step_df["prior_score"].clip(0.05, 1.0))
+            + FIXED_WEIGHTS[1] * np.log(step_df["stability_score"].clip(0.05, 1.0))
+            + FIXED_WEIGHTS[2]
+            * np.log(step_df["history_consistency_score"].clip(0.05, 1.0))
+        )
+    ).map(lambda value: clamp_score(float(value), default=0.5))
+    return step_df
+
+
+def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
+    """Build node features and residual targets without using confidence as x."""
+    node_count = len(graph.zone_names)
+    node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
+    node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
+    history_tensor = torch.full((node_count, len(HISTORY_FEATURES)), 0.0)
+    prior = torch.full((node_count,), 0.4, dtype=torch.float32)
+    stability = torch.full((node_count,), 0.5, dtype=torch.float32)
+    history_consistency = torch.full((node_count,), 0.6, dtype=torch.float32)
+    full_confidence = torch.full((node_count,), 0.5, dtype=torch.float32)
+    location_id = torch.full((node_count,), -1, dtype=torch.long)
+
+    for row in step_df.itertuples():
+        loc_id = int(row.PULocationID)
+        zone_name = graph.location_to_zone.get(loc_id)
+        if zone_name is None:
+            continue
+        node_idx = graph.zone_idx_map.get(zone_name)
+        if node_idx is None:
+            continue
+
+        node_pred[node_idx] = float(row.base_pred)
+        node_label[node_idx] = float(row.true_value)
+        location_id[node_idx] = loc_id
+        prior[node_idx] = clamp_score(float(row.prior_score), default=0.4)
+        stability[node_idx] = clamp_score(float(row.stability_score), default=0.5)
+        history_consistency[node_idx] = clamp_score(
+            float(row.history_consistency_score),
+            default=0.6,
+        )
+        full_confidence[node_idx] = clamp_score(float(row.full_confidence), default=0.5)
+        for idx, feature_name in enumerate(HISTORY_FEATURES):
+            value = getattr(row, feature_name, 0.0)
+            history_tensor[node_idx, idx] = 0.0 if pd.isna(value) else float(value)
+
+    valid_indices = torch.where(~torch.isnan(node_pred) & ~torch.isnan(node_label))[0]
+    if valid_indices.numel() < 3:
+        raise ValueError("Not enough valid graph nodes to train/evaluate residual GNN.")
+
+    edge_index = remap_edges_to_valid_nodes(graph.edge_index, valid_indices)
+    node_pred = node_pred[valid_indices]
+    node_label = node_label[valid_indices]
+    history_tensor = history_tensor[valid_indices]
+    prior = prior[valid_indices]
+    stability = stability[valid_indices]
+    history_consistency = history_consistency[valid_indices]
+    full_confidence = full_confidence[valid_indices]
+    location_id = location_id[valid_indices]
+
+    x_feat = torch.cat(
+        [
+            node_pred.unsqueeze(1),
+            torch.log1p(history_tensor),
+        ],
+        dim=1,
+    )
+    residual_target = node_label - node_pred
+
+    return Data(
+        x=x_feat,
+        edge_index=edge_index,
+        y=residual_target,
+        base_pred=node_pred,
+        true_value=node_label,
+        location_id=location_id,
+        prior_score=prior,
+        stability_score=stability,
+        history_consistency_score=history_consistency,
+        full_confidence=full_confidence,
+    )
+
+
 def component_tensor(data: Data) -> torch.Tensor:
     return torch.stack(
         [
             data.prior_score.float(),
             data.stability_score.float(),
-            data.neighbourhood_score.float(),
+            data.history_consistency_score.float(),
         ],
         dim=1,
     ).clamp(min=0.05, max=1.0)
@@ -345,11 +473,11 @@ def simplex_grid(step: float) -> List[np.ndarray]:
     candidates: List[np.ndarray] = []
     for w_prior in values:
         for w_stability in values:
-            w_neighbourhood = 1.0 - w_prior - w_stability
-            if w_neighbourhood < -1e-8:
+            w_history = 1.0 - w_prior - w_stability
+            if w_history < -1e-8:
                 continue
             weights = np.array(
-                [w_prior, w_stability, max(0.0, w_neighbourhood)],
+                [w_prior, w_stability, max(0.0, w_history)],
                 dtype=np.float32,
             )
             weights = weights / weights.sum()
@@ -411,10 +539,10 @@ def collect_predictions(
             "sample_weight": sample_weight.cpu().numpy(),
             "prior_score": data.prior_score.cpu().numpy(),
             "stability_score": data.stability_score.cpu().numpy(),
-            "neighbourhood_score": data.neighbourhood_score.cpu().numpy(),
+            "history_consistency_score": data.history_consistency_score.cpu().numpy(),
             "w_prior": float(weights[0]),
             "w_stability": float(weights[1]),
-            "w_neighbourhood": float(weights[2]),
+            "w_history_consistency": float(weights[2]),
             "best_epoch": result.best_epoch,
             "best_val_loss": result.best_val_loss,
         }
@@ -570,7 +698,7 @@ def run_single_mode(
         "test_mse": test_metrics["MSE"],
         "w_prior": float(selected_weights[0]),
         "w_stability": float(selected_weights[1]),
-        "w_neighbourhood": float(selected_weights[2]),
+        "w_history_consistency": float(selected_weights[2]),
         "n_train": int(splits.train.sum().item()),
         "n_val": int(splits.val.sum().item()),
         "n_test": int(splits.test.sum().item()),
@@ -584,7 +712,7 @@ def format_weights(weights: np.ndarray) -> str:
     return (
         f"prior={weights[0]:.3f}, "
         f"stability={weights[1]:.3f}, "
-        f"neighbourhood={weights[2]:.3f}"
+        f"history_consistency={weights[2]:.3f}"
     )
 
 
@@ -616,7 +744,9 @@ def summarize_results(detailed_df: pd.DataFrame, hourly_df: pd.DataFrame) -> pd.
                 "Std hourly MAE": float(mode_hourly["test_mae"].std(ddof=0)),
                 "Mean w_prior": float(mode_hourly["w_prior"].mean()),
                 "Mean w_stability": float(mode_hourly["w_stability"].mean()),
-                "Mean w_neighbourhood": float(mode_hourly["w_neighbourhood"].mean()),
+                "Mean w_history_consistency": float(
+                    mode_hourly["w_history_consistency"].mean()
+                ),
             }
         )
 
@@ -650,8 +780,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Graph-compatible zones selected:", len(zones))
 
     zone_hourly_counts = build_zone_hourly_counts(df)
-    adjacency = build_zone_adjacency(args.edge_csv, lookup_df)
-
     manager_cfg = ManagerConfig(M_mc_test=args.mc_samples)
     manager = MultiScaleModelManager(checkpoint_dir=str(args.checkpoint_dir), cfg=manager_cfg)
     gnn_cfg = GNNTrainingConfig(
@@ -680,7 +808,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         step_df = compute_confidence_components(
             step_df=baseline_df,
             history_df=history_df,
-            adjacency=adjacency,
         )
         data = build_gnn_features(step_df=step_df, graph=graph)
         splits = make_node_splits(
@@ -710,7 +837,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 [
                     hourly_record["w_prior"],
                     hourly_record["w_stability"],
-                    hourly_record["w_neighbourhood"],
+                    hourly_record["w_history_consistency"],
                 ],
                 dtype=np.float32,
             )
@@ -777,7 +904,12 @@ def plot_metrics(summary_df: pd.DataFrame, hourly_df: pd.DataFrame, plot_path: P
 
     axes[1].bar(x - 0.25, summary_df["Mean w_prior"], 0.25, label="prior")
     axes[1].bar(x, summary_df["Mean w_stability"], 0.25, label="stability")
-    axes[1].bar(x + 0.25, summary_df["Mean w_neighbourhood"], 0.25, label="neighbourhood")
+    axes[1].bar(
+        x + 0.25,
+        summary_df["Mean w_history_consistency"],
+        0.25,
+        label="history consistency",
+    )
     axes[1].set_title("Mean Selected Weights")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(models, rotation=18, ha="right")
@@ -814,7 +946,7 @@ def print_summary_table(summary_df: pd.DataFrame) -> None:
         "MSE",
         "Mean w_prior",
         "Mean w_stability",
-        "Mean w_neighbourhood",
+        "Mean w_history_consistency",
         "MAE improvement over fixed (%)",
     ]
     display_df = summary_df[display_columns].copy()

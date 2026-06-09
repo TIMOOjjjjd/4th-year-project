@@ -42,8 +42,6 @@ for f in os.listdir('.'):
 # ✅ 用户配置区（直接改这里即可）
 # =====================================================
 DATA_PATH = "data.parquet"
-LOOKUP_PATH = "taxi-zone-lookup.csv"
-EDGE_WEIGHT_MATRIX = "edge_weight_matrix_od.csv"
 CHECKPOINT_DIR = f"checkpoints_{MODEL_BACKEND}"
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
@@ -61,6 +59,7 @@ HISTORY_WINDOWS = {
     "mean_720h": 24 * 30,
 }
 HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
+HISTORY_CONSISTENCY_TAU = 1.0
 
 
 def _cleanup_old_checkpoints(root: Path, checkpoint_dir: str) -> None:
@@ -111,40 +110,6 @@ def _compute_history_means(
     return means
 
 
-def _load_zone_lookup(path: str) -> pd.DataFrame:
-    df_lookup = pd.read_csv(path)
-    return df_lookup.drop_duplicates(subset="LocationID")
-
-
-def _build_zone_adjacency(edge_csv: str, lookup_df: pd.DataFrame) -> Dict[int, List[int]]:
-    """Create adjacency lists keyed by LocationID based on the OD flow graph."""
-    df_adj = pd.read_csv(edge_csv, index_col=0)
-    df_adj.index = [str(idx).lstrip("\ufeff") for idx in df_adj.index]
-    df_adj.columns = [str(col).lstrip("\ufeff") for col in df_adj.columns]
-
-    zone_lookup = lookup_df.drop_duplicates(subset="Zone")
-    zone_to_location = dict(zip(zone_lookup["Zone"], zone_lookup["LocationID"]))
-
-    adjacency: Dict[int, List[int]] = {}
-    for zone_name in df_adj.index:
-        loc_id = zone_to_location.get(zone_name)
-        if loc_id is None or pd.isna(loc_id):
-            continue
-
-        weights = df_adj.loc[zone_name]
-        neighbors: List[int] = []
-        for neighbor_zone, weight in weights.items():
-            if weight <= 0:
-                continue
-            neighbor_loc = zone_to_location.get(neighbor_zone)
-            if neighbor_loc is None or pd.isna(neighbor_loc):
-                continue
-            neighbors.append(int(neighbor_loc))
-
-        adjacency[int(loc_id)] = neighbors
-    return adjacency
-
-
 def _compute_prior_scores(df: pd.DataFrame) -> Dict[int, float]:
     """Higher scores for zones with richer history (proxy for low sparsity)."""
     counts = df.groupby("PULocationID").size().astype(float)
@@ -183,48 +148,42 @@ def _compute_stability_scores(step_df: pd.DataFrame) -> Dict[int, float]:
     return scores
 
 
-def _compute_neighborhood_scores(step_df: pd.DataFrame, adjacency: Dict[int, List[int]]) -> Dict[int, float]:
-    """Compare each zone prediction to its graph neighbors to measure trend agreement."""
-    pred_map = {
-        int(row.PULocationID): float(row.y_pred)
-        for row in step_df.itertuples()
-        if np.isfinite(row.y_pred)
-    }
-    if not pred_map:
-        return {}
+def _compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float]:
+    """Higher scores when 24h/168h/720h historical means agree."""
+    scores: Dict[int, float] = {}
+    for row in step_df.itertuples():
+        values = []
+        for feature_name in HISTORY_FEATURES:
+            value = float(getattr(row, feature_name, np.nan))
+            if np.isfinite(value):
+                values.append(max(value, 0.0))
 
-    all_preds = np.array(list(pred_map.values()))
-    global_scale = float(np.percentile(np.abs(all_preds), 75)) + 1.0
-
-    neighborhood_scores: Dict[int, float] = {}
-    for zid, pred in pred_map.items():
-        neighbors = adjacency.get(zid, [])
-        neighbor_preds = [pred_map[n] for n in neighbors if n in pred_map]
-        if not neighbor_preds:
-            neighborhood_scores[zid] = 0.6
+        zid = int(row.PULocationID)
+        if len(values) < 2:
+            scores[zid] = 0.5
             continue
 
-        neighbor_array = np.array(neighbor_preds, dtype=np.float32)
-        mu = float(neighbor_array.mean())
-        sigma = float(neighbor_array.std())
-        denom = sigma + 0.1 * abs(mu) + global_scale
-        diff = abs(pred - mu)
-        raw = float(np.exp(-diff / max(denom, 1e-3)))
-        neighborhood_scores[zid] = float(np.clip(raw, 0.05, 1.0))
-    return neighborhood_scores
+        log_values = np.log1p(np.array(values, dtype=np.float32))
+        dispersion = float(log_values.std())
+        raw = float(np.exp(-dispersion / HISTORY_CONSISTENCY_TAU))
+        scores[zid] = float(np.clip(raw, 0.05, 1.0))
+    return scores
 
 
 def _combine_confidence_components(
-    prior: float, stability: float, neighborhood: float, weights: Dict[str, float]
+    prior: float,
+    stability: float,
+    history_consistency: float,
+    weights: Dict[str, float],
 ) -> float:
     prior_c = np.clip(prior, 0.05, 1.0)
     stability_c = np.clip(stability, 0.05, 1.0)
-    neighborhood_c = np.clip(neighborhood, 0.05, 1.0)
+    history_c = np.clip(history_consistency, 0.05, 1.0)
 
     log_score = (
         weights["prior"] * np.log(prior_c)
         + weights["stability"] * np.log(stability_c)
-        + weights["neighborhood"] * np.log(neighborhood_c)
+        + weights["history_consistency"] * np.log(history_c)
     )
     return float(np.clip(np.exp(log_score), 0.05, 1.0))
 
@@ -232,11 +191,10 @@ def _combine_confidence_components(
 def _assign_confidence_scores(
     step_df: pd.DataFrame,
     prior_scores: Dict[int, float],
-    adjacency: Dict[int, List[int]],
 ) -> Dict[int, float]:
     stability_scores = _compute_stability_scores(step_df)
-    neighborhood_scores = _compute_neighborhood_scores(step_df, adjacency)
-    weights = {"prior": 0.3, "stability": 0.4, "neighborhood": 0.3}
+    history_scores = _compute_history_consistency_scores(step_df)
+    weights = {"prior": 0.3, "stability": 0.4, "history_consistency": 0.3}
 
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
@@ -247,10 +205,18 @@ def _assign_confidence_scores(
 
         prior = prior_scores.get(zid, 0.4)
         stability = stability_scores.get(zid, 0.5)
-        neighborhood = neighborhood_scores.get(zid, 0.6)
-        combined = _combine_confidence_components(prior, stability, neighborhood, weights)
+        history_consistency = history_scores.get(zid, 0.6)
+        combined = _combine_confidence_components(
+            prior,
+            stability,
+            history_consistency,
+            weights,
+        )
         zone_confidence[zid] = combined
 
+    step_df["history_consistency_score"] = step_df["PULocationID"].map(
+        lambda zid: history_scores.get(int(zid), 0.6)
+    )
     step_df["confidence"] = step_df["PULocationID"].map(
         lambda zid: zone_confidence.get(int(zid), 0.0)
     )
@@ -279,7 +245,6 @@ def run_rolling_with_gnn(
     df: pd.DataFrame,
     manager: MultiScaleModelManager,
     device: torch.device,
-    adjacency: Dict[int, List[int]],
     zone_hourly_counts: pd.Series,
 ) -> None:
     zones = sorted(df["PULocationID"].unique())
@@ -345,7 +310,7 @@ def run_rolling_with_gnn(
         step_df["target_hour"] = target_ts
         history_df = df[df["datetime"] < target_ts]
         hour_prior_scores = _compute_prior_scores(history_df)
-        zone_confidence = _assign_confidence_scores(step_df, hour_prior_scores, adjacency)
+        zone_confidence = _assign_confidence_scores(step_df, hour_prior_scores)
 
         mask = step_df["y_pred"].notna() & step_df["y_true"].notna()
         if mask.any():
@@ -455,13 +420,11 @@ def main() -> None:
     print("Using device:", device)
 
     df = prepare_df()
-    lookup_df = _load_zone_lookup(LOOKUP_PATH)
-    adjacency = _build_zone_adjacency(EDGE_WEIGHT_MATRIX, lookup_df)
     zone_hourly_counts = _build_zone_hourly_counts(df)
     cfg = ManagerConfig(M_mc_test=MC_DROPOUT_SAMPLES)
     manager = MultiScaleModelManager(checkpoint_dir=CHECKPOINT_DIR, cfg=cfg)
 
-    run_rolling_with_gnn(df, manager, device, adjacency, zone_hourly_counts)
+    run_rolling_with_gnn(df, manager, device, zone_hourly_counts)
 
 
 if __name__ == "__main__":
@@ -472,10 +435,7 @@ if __name__ == "__main__":
 
 # parpare_df() 负责导入dataframe，并进行预处理，包括提取pickup location 和 pickuptime，去除没有数据的taxizone
 # _compute_prior_scores(df)负责统计每一个taxizone的历史数据量并进行归一化，作为GraphSAGE confidence的其中一个参考
-# _load_zone_lookup()负责对应zonename和zoneid
-# _build_zone_adjacency 构建一个 以 LocationID 为 key 的邻接表（adjacency list），用于GraphSAGE GNN。 使用edgeweight matrix（如果 OD 流量为 0 → 不视为邻居
-# 如果 >0 → 视为有边）
 # _build_zone_hourly_counts 按 Taxi Zone（PULocationID） + 小时（datetime） 分组统计订单数量，（每个区域每小时有多少订单？）返回 pandas series
 # cfg定义RNN参数
 # 配置 cfg和 MultiScaleModelManager（chekpointpath 和 cfg）
-#启动run_rolling_with_gnn（df, manager, device, prior_scores, adjacency, zone_hourly_counts）
+#启动run_rolling_with_gnn（df, manager, device, zone_hourly_counts）
