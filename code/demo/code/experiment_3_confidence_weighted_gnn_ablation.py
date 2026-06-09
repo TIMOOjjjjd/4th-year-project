@@ -9,6 +9,14 @@ This experiment keeps the residual refinement setting from Experiment 2:
 The ablation changes only the residual loss sample weights. All modes use the
 same temporal baseline, graph, node features, GNN architecture, splits, epochs,
 learning rate, and initialization seed.
+
+Compared modes:
+
+    none: no confidence weighting
+    prior_only: historical-data prior only
+    stability_only: MC-variance stability only
+    neighbourhood_only: OD-neighbour prediction consistency only
+    full: fixed prior/stability/neighbourhood weights from Experiment 2
 """
 
 from __future__ import annotations
@@ -86,8 +94,11 @@ ABLATION_MODES = {
         "description": "only use neighbourhood consistency score as sample weight",
     },
     "full": {
-        "model": "GNN + full confidence",
-        "description": "use weighted prior/stability/neighbourhood confidence",
+        "model": "GNN + fixed full confidence",
+        "description": (
+            "use fixed log-space prior/stability/neighbourhood weights "
+            "0.3/0.4/0.3"
+        ),
     },
 }
 MODE_ORDER = [
@@ -511,9 +522,13 @@ def compute_confidence_components(
         )
     )
     step_df["full_confidence"] = (
-        CONFIDENCE_WEIGHTS["prior"] * step_df["prior_score"]
-        + CONFIDENCE_WEIGHTS["stability"] * step_df["stability_score"]
-        + CONFIDENCE_WEIGHTS["neighbourhood"] * step_df["neighbourhood_score"]
+        np.exp(
+            CONFIDENCE_WEIGHTS["prior"] * np.log(step_df["prior_score"].clip(0.05, 1.0))
+            + CONFIDENCE_WEIGHTS["stability"]
+            * np.log(step_df["stability_score"].clip(0.05, 1.0))
+            + CONFIDENCE_WEIGHTS["neighbourhood"]
+            * np.log(step_df["neighbourhood_score"].clip(0.05, 1.0))
+        )
     ).map(lambda value: clamp_score(float(value), default=0.5))
     return step_df
 
@@ -716,7 +731,9 @@ def train_residual_gnn_with_weighted_loss(
         residual_pred, _ = model(data_device)
 
         loss_per_node = (residual_pred[train_mask] - data_device.y[train_mask]) ** 2
-        loss = (sample_weight[train_mask] * loss_per_node).mean()
+        train_weight = sample_weight[train_mask]
+        train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
+        loss = (train_weight * loss_per_node).mean()
         loss.backward()
         optimizer.step()
         scheduler.step()

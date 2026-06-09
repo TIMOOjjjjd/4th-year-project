@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.preprocessing import MinMaxScaler
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -215,7 +216,7 @@ class MultiScaleModelManager:
         zone_df = df[df["PULocationID"] == zone_id].copy()
         hourly = zone_df.groupby("datetime").size().reset_index(name="passenger_count")
 
-        rng = pd.date_range(start=start_date, end=end_inclusive, freq="H")
+        rng = pd.date_range(start=start_date, end=end_inclusive, freq="h")
         hourly = (
             hourly.set_index("datetime")
             .reindex(rng)
@@ -348,50 +349,92 @@ class MultiScaleModelManager:
         data_range = scaler.data_max_[0] - scaler.data_min_[0]
         return std_scaled * data_range
 
+    def _confidence_weighted_auxiliary_loss(
+        self,
+        model: nn.Module,
+        embeddings: Tuple[torch.Tensor, ...],
+        x_tensor: Dict[str, torch.Tensor],
+        target: torch.Tensor,
+        loss_kind: str,
+    ) -> torch.Tensor:
+        if self.cfg.lambda_aux <= 0:
+            return torch.tensor(0.0, dtype=target.dtype, device=target.device)
+
+        with torch.no_grad():
+            mc_embeddings = model.mc_branch_embeddings(x_tensor, self.cfg.K_mc_train)
+            weights = self._conf_weights_from_embeddings(mc_embeddings)
+
+        h_1h, h_1d, h_1w, h_1m = embeddings
+        aux_preds = (
+            model.head_1h(h_1h),
+            model.head_1d(h_1d),
+            model.head_1w(h_1w),
+            model.head_1m(h_1m),
+        )
+        loss_fn = F.smooth_l1_loss if loss_kind == "smooth_l1" else F.mse_loss
+        aux_losses = []
+        for pred, weight in zip(aux_preds, weights):
+            per_sample_loss = loss_fn(pred, target, reduction="none")
+            aux_losses.append((per_sample_loss * weight).mean())
+        return torch.stack(aux_losses).mean()
+
     # ---------- training ----------
     def train_once(self, df: pd.DataFrame, zone_id: int, context_end: pd.Timestamp) -> None:
         if self.has_checkpoint(zone_id):
             return
 
         hourly = self._prepare_zone_series(df, zone_id, context_end)
-        X_tensor, y_tensor, scaler = self._build_training_windows(hourly)
+        scaler = self._fit_scaler_hist(
+            hourly,
+            fit_until_exclusive=context_end + pd.Timedelta(hours=1),
+        )
+        X_tensor, y_tensor, scaler = self._build_training_windows(hourly, scaler)
 
         model = MultiScaleModel(self.cfg.hidden_size, p_drop=self.cfg.p_drop).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.lr_full)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=self.cfg.lr_full,
+            weight_decay=self.cfg.weight_decay,
+        )
         criterion = nn.MSELoss()
 
         best_loss = float("inf")
+        best_state = None
         patience_ctr = 0
 
         for _ in range(self.cfg.epochs_full):
             model.train()
             optimizer.zero_grad()
 
-            y_main, _ = model(X_tensor)
+            y_main, embeddings = model(X_tensor)
             L_main = criterion(y_main, y_tensor)
-
-            with torch.no_grad():
-                embeddings = model.mc_branch_embeddings(X_tensor, self.cfg.K_mc_train)
-                weights = self._conf_weights_from_embeddings(embeddings)
-
-            # No auxiliary head outputs-0305-24h anymore; use embedding-confidence only to scale main loss if needed
-            # Here we approximate by weighting main loss with average confidence across branches
-            avg_conf = sum(weights) / len(weights)
-            L_aux = (L_main * avg_conf.mean()).detach() * 0.0
-
+            L_aux = self._confidence_weighted_auxiliary_loss(
+                model,
+                embeddings,
+                X_tensor,
+                y_tensor,
+                loss_kind="mse",
+            )
             loss = L_main + self.cfg.lambda_aux * L_aux
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
             optimizer.step()
 
             current = loss.item()
             if current < best_loss:
                 best_loss = current
+                best_state = {
+                    key: value.detach().cpu().clone()
+                    for key, value in model.state_dict().items()
+                }
                 patience_ctr = 0
             else:
                 patience_ctr += 1
                 if patience_ctr >= self.cfg.patience_full:
                     break
 
+        if best_state is not None:
+            model.load_state_dict(best_state)
         self._save(zone_id, model, scaler)
         self._save_meta(zone_id, context_end)
 
@@ -410,19 +453,16 @@ class MultiScaleModelManager:
         epochs = epochs if epochs is not None else self.cfg.epochs_incremental
         lr = lr if lr is not None else self.cfg.lr_incremental
 
-        model, _ = self._load(zone_id)
+        model, scaler = self._load(zone_id)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=self.cfg.weight_decay)
         criterion = nn.SmoothL1Loss()
 
         hourly = self._prepare_zone_series(df, zone_id, end_inclusive=new_until)
-        fit_start = new_until - pd.Timedelta(days=30)
-        hourly_fit = hourly[(hourly["datetime"] < new_until) & (hourly["datetime"] >= fit_start)].copy()
-        scaler = self._fit_scaler_hist(hourly_fit, fit_until_exclusive=new_until)
         hourly["passenger_count_scaled"] = scaler.transform(hourly[["passenger_count"]])
 
         idx_map = {ts: idx for idx, ts in enumerate(hourly["datetime"])}
-        s_list = pd.date_range(start=prev_until + pd.Timedelta(hours=1), end=new_until, freq="H")
+        s_list = pd.date_range(start=prev_until + pd.Timedelta(hours=1), end=new_until, freq="h")
         series = hourly["passenger_count_scaled"]
 
         X_1h, X_1d, X_1w, X_1m, Y = [], [], [], [], []
@@ -442,7 +482,7 @@ class MultiScaleModelManager:
 
         if not X_1m:
             self._save(zone_id, model, scaler)
-            self._save_meta(zone_id, prev_until)
+            self._save_meta(zone_id, new_until)
             return
 
         X = {
@@ -455,16 +495,15 @@ class MultiScaleModelManager:
 
         for _ in range(max(1, epochs)):
             optimizer.zero_grad()
-            y_main, _ = model(X)
+            y_main, embeddings = model(X)
             L_main = criterion(y_main, Y)
-
-            with torch.no_grad():
-                embeddings = model.mc_branch_embeddings(X, self.cfg.K_mc_train)
-                weights = self._conf_weights_from_embeddings(embeddings)
-
-            avg_conf = sum(weights) / len(weights)
-            L_aux = (L_main * avg_conf.mean()).detach() * 0.0
-
+            L_aux = self._confidence_weighted_auxiliary_loss(
+                model,
+                embeddings,
+                X,
+                Y,
+                loss_kind="smooth_l1",
+            )
             loss = L_main + self.cfg.lambda_aux * L_aux
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
@@ -478,10 +517,9 @@ class MultiScaleModelManager:
         if not self.has_checkpoint(zone_id):
             raise FileNotFoundError(f"Zone {zone_id} has no checkpoint; train first.")
 
-        model, _ = self._load(zone_id)
+        model, scaler = self._load(zone_id)
         context_end = target_date - self._forecast_delta
         hourly = self._prepare_zone_series(df, zone_id, end_inclusive=context_end)
-        scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
         X_last = self._build_inference_window(hourly, scaler, context_end)
 
         model.eval()
@@ -500,10 +538,9 @@ class MultiScaleModelManager:
         if not self.has_checkpoint(zone_id):
             raise FileNotFoundError(f"Zone {zone_id} has no checkpoint; train first.")
 
-        model, _ = self._load(zone_id)
+        model, scaler = self._load(zone_id)
         context_end = target_date - self._forecast_delta
         hourly = self._prepare_zone_series(df, zone_id, end_inclusive=context_end)
-        scaler = self._fit_scaler_hist(hourly, fit_until_exclusive=target_date)
         X_last = self._build_inference_window(hourly, scaler, context_end)
 
         model.eval()

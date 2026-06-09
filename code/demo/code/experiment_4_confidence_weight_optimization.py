@@ -1,0 +1,843 @@
+"""Experiment 4: confidence component weight optimization.
+
+This script compares three confidence-weight optimization schemes against the
+fixed 0.3/0.4/0.3 confidence used in Experiment 2.
+
+All modes keep the same residual refinement formulation:
+
+    residual_target = true_value - base_pred
+    refined_pred = base_pred + residual_pred
+
+The compared confidence weight modes are:
+
+    fixed: fixed prior/stability/neighbourhood weights, 0.3/0.4/0.3
+    grid_search: validation-selected simplex grid weights
+    random_search: validation-selected Dirichlet random weights
+    learned_softmax: trainable softmax component weights
+
+The confidence score is used as a normalized residual-loss sample weight. It is
+not used as a training label.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch_geometric.data import Data
+
+from experiment_3_confidence_weighted_gnn_ablation import (
+    BASE_DIR,
+    DEFAULT_DATA_PATH,
+    DEFAULT_LOOKUP_PATH,
+    DEFAULT_RESULTS_DIR,
+    EXCLUDED_ZONES,
+    ROLLING_STEPS,
+    START_TARGET,
+    GNNResult,
+    GNNTrainingConfig,
+    SplitMasks,
+    build_zone_adjacency,
+    build_zone_hourly_counts,
+    clean_checkpoint_dir,
+    build_gnn_features,
+    compute_confidence_components,
+    evaluate_refined_predictions,
+    load_required_data,
+    make_node_splits,
+    run_multiscale_temporal_baseline,
+    select_zones,
+    set_random_seed,
+)
+from gnn_model import MultiScaleGraphSAGE
+from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
+
+
+COMPONENT_NAMES = ("prior", "stability", "neighbourhood")
+FIXED_WEIGHTS = np.array([0.3, 0.4, 0.3], dtype=np.float32)
+DEFAULT_OPT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
+
+MODE_SPECS = {
+    "fixed": {
+        "model": "Fixed confidence weights",
+        "description": "fixed log-space weights 0.3/0.4/0.3",
+    },
+    "grid_search": {
+        "model": "Grid-searched confidence weights",
+        "description": "validation-selected simplex grid weights",
+    },
+    "random_search": {
+        "model": "Random-searched confidence weights",
+        "description": "validation-selected Dirichlet random weights",
+    },
+    "learned_softmax": {
+        "model": "Learned softmax confidence weights",
+        "description": "component weights optimized jointly with GraphSAGE",
+    },
+}
+MODE_ORDER = ["fixed", "grid_search", "random_search", "learned_softmax"]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Experiment 4: confidence weight optimization."
+    )
+    parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
+    parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
+    parser.add_argument("--edge-csv", type=Path, default=DEFAULT_OPT_EDGE_WEIGHT_MATRIX)
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=BASE_DIR / "checkpoints_experiment_4_multiscale",
+    )
+    parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
+    parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
+    parser.add_argument("--rolling-steps", type=int, default=ROLLING_STEPS)
+    parser.add_argument("--excluded-zones", type=int, nargs="*", default=EXCLUDED_ZONES)
+    parser.add_argument("--mc-samples", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--train-ratio", type=float, default=0.6)
+    parser.add_argument("--val-ratio", type=float, default=0.2)
+    parser.add_argument("--gnn-epochs", type=int, default=300)
+    parser.add_argument("--gnn-hidden-dim", type=int, default=256)
+    parser.add_argument("--gnn-dropout", type=float, default=0.1)
+    parser.add_argument("--gnn-lr", type=float, default=0.01)
+    parser.add_argument("--gnn-patience", type=int, default=40)
+    parser.add_argument(
+        "--modes",
+        nargs="*",
+        choices=MODE_ORDER,
+        default=MODE_ORDER,
+        help="Subset of confidence optimization modes to run.",
+    )
+    parser.add_argument(
+        "--grid-step",
+        type=float,
+        default=0.25,
+        help="Simplex grid step for grid_search. 0.25 gives 15 candidates.",
+    )
+    parser.add_argument(
+        "--random-candidates",
+        type=int,
+        default=24,
+        help="Number of Dirichlet candidates for random_search.",
+    )
+    parser.add_argument(
+        "--learned-entropy",
+        type=float,
+        default=0.0,
+        help="Optional entropy regularizer for learned_softmax weights.",
+    )
+    parser.add_argument(
+        "--clean-checkpoints",
+        action="store_true",
+        help="Delete this experiment's temporal checkpoint directory before running.",
+    )
+    parser.add_argument(
+        "--max-zones",
+        type=int,
+        default=None,
+        help="Optional smoke-test limit. Default evaluates all graph-compatible zones.",
+    )
+    parser.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="Skip writing experiment_4_confidence_weight_optimization_metrics.png.",
+    )
+    args = parser.parse_args()
+    if not args.modes:
+        parser.error("--modes requires at least one mode when provided.")
+    return args
+
+
+def component_tensor(data: Data) -> torch.Tensor:
+    return torch.stack(
+        [
+            data.prior_score.float(),
+            data.stability_score.float(),
+            data.neighbourhood_score.float(),
+        ],
+        dim=1,
+    ).clamp(min=0.05, max=1.0)
+
+
+def confidence_from_weights(data: Data, weights: torch.Tensor) -> torch.Tensor:
+    weights = weights.float()
+    weights = weights / weights.sum().clamp(min=1e-6)
+    components = component_tensor(data).to(weights.device)
+    log_confidence = (torch.log(components) * weights.unsqueeze(0)).sum(dim=1)
+    return torch.exp(log_confidence).clamp(min=0.05, max=1.0)
+
+
+def train_residual_gnn_with_sample_weight(
+    data: Data,
+    splits: SplitMasks,
+    sample_weight: torch.Tensor,
+    device: torch.device,
+    cfg: GNNTrainingConfig,
+    seed: int,
+) -> GNNResult:
+    set_random_seed(seed)
+    model = MultiScaleGraphSAGE(
+        in_dim=int(data.x.shape[1]),
+        hidden_dim=cfg.hidden_dim,
+        dropout=cfg.dropout,
+    ).to(device)
+
+    data_device = copy.deepcopy(data).to(device)
+    sample_weight = sample_weight.to(device).float().clamp(min=0.05, max=1.0)
+    train_mask = splits.train.to(device)
+    val_mask = splits.val.to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
+    loss_func = nn.SmoothL1Loss(reduction="none")
+
+    best_state: Optional[Dict[str, torch.Tensor]] = None
+    best_epoch = 0
+    best_val_loss = float("inf")
+    patience_counter = 0
+
+    for epoch in range(1, cfg.epochs + 1):
+        model.train()
+        optimizer.zero_grad()
+        residual_pred, _ = model(data_device)
+
+        loss_per_node = loss_func(residual_pred[train_mask], data_device.y[train_mask])
+        train_weight = sample_weight[train_mask]
+        train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
+        loss = (loss_per_node * train_weight).mean()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_residual_pred, _ = model(data_device)
+            val_loss = loss_func(val_residual_pred[val_mask], data_device.y[val_mask]).mean()
+            val_loss_value = float(val_loss.item())
+
+        if val_loss_value < best_val_loss:
+            best_val_loss = val_loss_value
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= cfg.patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    model.eval()
+    with torch.no_grad():
+        residual_pred, refined_pred = model(data_device)
+
+    return GNNResult(
+        residual_pred=residual_pred.detach().cpu().numpy(),
+        refined_pred=refined_pred.detach().cpu().numpy(),
+        best_epoch=best_epoch,
+        best_val_loss=best_val_loss,
+    )
+
+
+def train_residual_gnn_with_learned_weights(
+    data: Data,
+    splits: SplitMasks,
+    device: torch.device,
+    cfg: GNNTrainingConfig,
+    seed: int,
+    entropy_weight: float,
+) -> Tuple[GNNResult, np.ndarray]:
+    set_random_seed(seed)
+    model = MultiScaleGraphSAGE(
+        in_dim=int(data.x.shape[1]),
+        hidden_dim=cfg.hidden_dim,
+        dropout=cfg.dropout,
+    ).to(device)
+    logits = nn.Parameter(torch.log(torch.tensor(FIXED_WEIGHTS, dtype=torch.float32)).to(device))
+
+    data_device = copy.deepcopy(data).to(device)
+    train_mask = splits.train.to(device)
+    val_mask = splits.val.to(device)
+    optimizer = torch.optim.Adam(
+        list(model.parameters()) + [logits],
+        lr=cfg.learning_rate,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
+    loss_func = nn.SmoothL1Loss(reduction="none")
+
+    best_state: Optional[Dict[str, torch.Tensor]] = None
+    best_logits: Optional[torch.Tensor] = None
+    best_epoch = 0
+    best_val_loss = float("inf")
+    patience_counter = 0
+
+    for epoch in range(1, cfg.epochs + 1):
+        model.train()
+        optimizer.zero_grad()
+
+        weights = torch.softmax(logits, dim=0)
+        sample_weight = confidence_from_weights(data_device, weights)
+        residual_pred, _ = model(data_device)
+        loss_per_node = loss_func(residual_pred[train_mask], data_device.y[train_mask])
+        train_weight = sample_weight[train_mask]
+        train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
+        loss = (loss_per_node * train_weight).mean()
+        if entropy_weight > 0.0:
+            entropy = -(weights * torch.log(weights.clamp(min=1e-8))).sum()
+            loss = loss - entropy_weight * entropy
+
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_residual_pred, _ = model(data_device)
+            val_loss = loss_func(val_residual_pred[val_mask], data_device.y[val_mask]).mean()
+            val_loss_value = float(val_loss.item())
+
+        if val_loss_value < best_val_loss:
+            best_val_loss = val_loss_value
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+            best_logits = logits.detach().clone()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= cfg.patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    if best_logits is not None:
+        logits.data.copy_(best_logits)
+
+    learned_weights = torch.softmax(logits.detach(), dim=0)
+    model.eval()
+    with torch.no_grad():
+        residual_pred, refined_pred = model(data_device)
+
+    return (
+        GNNResult(
+            residual_pred=residual_pred.detach().cpu().numpy(),
+            refined_pred=refined_pred.detach().cpu().numpy(),
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+        ),
+        learned_weights.detach().cpu().numpy(),
+    )
+
+
+def simplex_grid(step: float) -> List[np.ndarray]:
+    if step <= 0.0 or step > 1.0:
+        raise ValueError("--grid-step must be in (0, 1].")
+
+    values = np.arange(0.0, 1.0 + step / 2.0, step)
+    candidates: List[np.ndarray] = []
+    for w_prior in values:
+        for w_stability in values:
+            w_neighbourhood = 1.0 - w_prior - w_stability
+            if w_neighbourhood < -1e-8:
+                continue
+            weights = np.array(
+                [w_prior, w_stability, max(0.0, w_neighbourhood)],
+                dtype=np.float32,
+            )
+            weights = weights / weights.sum()
+            candidates.append(weights)
+    return candidates
+
+
+def random_simplex_candidates(count: int, seed: int) -> List[np.ndarray]:
+    if count <= 0:
+        raise ValueError("--random-candidates must be positive.")
+    rng = np.random.default_rng(seed)
+    samples = rng.dirichlet(np.ones(len(COMPONENT_NAMES)), size=count)
+    return [sample.astype(np.float32) for sample in samples]
+
+
+def evaluate_split(
+    data: Data,
+    result: GNNResult,
+    mask: torch.Tensor,
+) -> Dict[str, float]:
+    mask_np = mask.cpu().numpy().astype(bool)
+    return evaluate_refined_predictions(
+        y_true=data.true_value.cpu().numpy()[mask_np],
+        y_pred=result.refined_pred[mask_np],
+    )
+
+
+def split_labels(splits: SplitMasks) -> np.ndarray:
+    labels = np.full(splits.train.numel(), "test", dtype=object)
+    labels[splits.train.cpu().numpy()] = "train"
+    labels[splits.val.cpu().numpy()] = "val"
+    labels[splits.test.cpu().numpy()] = "test"
+    return labels
+
+
+def collect_predictions(
+    target_hour: pd.Timestamp,
+    mode: str,
+    data: Data,
+    splits: SplitMasks,
+    result: GNNResult,
+    sample_weight: torch.Tensor,
+    weights: np.ndarray,
+) -> pd.DataFrame:
+    labels = split_labels(splits)
+    return pd.DataFrame(
+        {
+            "target_hour": target_hour,
+            "mode": mode,
+            "Model": MODE_SPECS[mode]["model"],
+            "PULocationID": data.location_id.cpu().numpy().astype(int),
+            "split": labels,
+            "is_test": labels == "test",
+            "base_pred": data.base_pred.cpu().numpy(),
+            "true_value": data.true_value.cpu().numpy(),
+            "residual_target": data.y.cpu().numpy(),
+            "residual_pred": result.residual_pred,
+            "refined_pred": result.refined_pred,
+            "sample_weight": sample_weight.cpu().numpy(),
+            "prior_score": data.prior_score.cpu().numpy(),
+            "stability_score": data.stability_score.cpu().numpy(),
+            "neighbourhood_score": data.neighbourhood_score.cpu().numpy(),
+            "w_prior": float(weights[0]),
+            "w_stability": float(weights[1]),
+            "w_neighbourhood": float(weights[2]),
+            "best_epoch": result.best_epoch,
+            "best_val_loss": result.best_val_loss,
+        }
+    )
+
+
+def train_candidate(
+    data: Data,
+    splits: SplitMasks,
+    weights: np.ndarray,
+    device: torch.device,
+    cfg: GNNTrainingConfig,
+    seed: int,
+) -> Tuple[GNNResult, torch.Tensor, Dict[str, float]]:
+    weight_tensor = torch.tensor(weights, dtype=torch.float32)
+    sample_weight = confidence_from_weights(data, weight_tensor)
+    result = train_residual_gnn_with_sample_weight(
+        data=data,
+        splits=splits,
+        sample_weight=sample_weight,
+        device=device,
+        cfg=cfg,
+        seed=seed,
+    )
+    val_metrics = evaluate_split(data=data, result=result, mask=splits.val)
+    return result, sample_weight, val_metrics
+
+
+def run_weight_search_mode(
+    mode: str,
+    candidates: Sequence[np.ndarray],
+    data: Data,
+    splits: SplitMasks,
+    device: torch.device,
+    cfg: GNNTrainingConfig,
+    seed: int,
+) -> Tuple[GNNResult, torch.Tensor, np.ndarray, Dict[str, float]]:
+    best_result: Optional[GNNResult] = None
+    best_sample_weight: Optional[torch.Tensor] = None
+    best_weights: Optional[np.ndarray] = None
+    best_val_metrics: Optional[Dict[str, float]] = None
+    best_val_mae = float("inf")
+
+    for candidate_idx, weights in enumerate(candidates):
+        result, sample_weight, val_metrics = train_candidate(
+            data=data,
+            splits=splits,
+            weights=weights,
+            device=device,
+            cfg=cfg,
+            seed=seed,
+        )
+        val_mae = val_metrics["MAE"]
+        if val_mae < best_val_mae:
+            best_val_mae = val_mae
+            best_result = result
+            best_sample_weight = sample_weight
+            best_weights = weights
+            best_val_metrics = val_metrics
+        print(
+            f"    {mode} candidate {candidate_idx + 1}/{len(candidates)} "
+            f"val_MAE={val_mae:.4f} weights={format_weights(weights)}"
+        )
+
+    if best_result is None or best_sample_weight is None or best_weights is None:
+        raise RuntimeError(f"No valid candidates for mode {mode}.")
+    if best_val_metrics is None:
+        best_val_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "MSE": float("nan")}
+    return best_result, best_sample_weight, best_weights, best_val_metrics
+
+
+def run_single_mode(
+    target_hour: pd.Timestamp,
+    mode: str,
+    data: Data,
+    splits: SplitMasks,
+    device: torch.device,
+    cfg: GNNTrainingConfig,
+    seed: int,
+    grid_step: float,
+    random_candidates: int,
+    learned_entropy: float,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    if mode == "fixed":
+        result, sample_weight, val_metrics = train_candidate(
+            data=data,
+            splits=splits,
+            weights=FIXED_WEIGHTS,
+            device=device,
+            cfg=cfg,
+            seed=seed,
+        )
+        selected_weights = FIXED_WEIGHTS
+    elif mode == "grid_search":
+        candidates = simplex_grid(grid_step)
+        result, sample_weight, selected_weights, val_metrics = run_weight_search_mode(
+            mode=mode,
+            candidates=candidates,
+            data=data,
+            splits=splits,
+            device=device,
+            cfg=cfg,
+            seed=seed,
+        )
+    elif mode == "random_search":
+        candidates = random_simplex_candidates(count=random_candidates, seed=seed)
+        result, sample_weight, selected_weights, val_metrics = run_weight_search_mode(
+            mode=mode,
+            candidates=candidates,
+            data=data,
+            splits=splits,
+            device=device,
+            cfg=cfg,
+            seed=seed,
+        )
+    elif mode == "learned_softmax":
+        result, selected_weights = train_residual_gnn_with_learned_weights(
+            data=data,
+            splits=splits,
+            device=device,
+            cfg=cfg,
+            seed=seed,
+            entropy_weight=learned_entropy,
+        )
+        sample_weight = confidence_from_weights(
+            data,
+            torch.tensor(selected_weights, dtype=torch.float32),
+        )
+        val_metrics = evaluate_split(data=data, result=result, mask=splits.val)
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    test_metrics = evaluate_split(data=data, result=result, mask=splits.test)
+    prediction_df = collect_predictions(
+        target_hour=target_hour,
+        mode=mode,
+        data=data,
+        splits=splits,
+        result=result,
+        sample_weight=sample_weight,
+        weights=selected_weights,
+    )
+    hourly_record = {
+        "target_hour": target_hour,
+        "mode": mode,
+        "Model": MODE_SPECS[mode]["model"],
+        "Description": MODE_SPECS[mode]["description"],
+        "val_mae": val_metrics["MAE"],
+        "val_rmse": val_metrics["RMSE"],
+        "val_mse": val_metrics["MSE"],
+        "test_mae": test_metrics["MAE"],
+        "test_rmse": test_metrics["RMSE"],
+        "test_mse": test_metrics["MSE"],
+        "w_prior": float(selected_weights[0]),
+        "w_stability": float(selected_weights[1]),
+        "w_neighbourhood": float(selected_weights[2]),
+        "n_train": int(splits.train.sum().item()),
+        "n_val": int(splits.val.sum().item()),
+        "n_test": int(splits.test.sum().item()),
+        "best_epoch": result.best_epoch,
+        "best_val_loss": result.best_val_loss,
+    }
+    return prediction_df, hourly_record
+
+
+def format_weights(weights: np.ndarray) -> str:
+    return (
+        f"prior={weights[0]:.3f}, "
+        f"stability={weights[1]:.3f}, "
+        f"neighbourhood={weights[2]:.3f}"
+    )
+
+
+def summarize_results(detailed_df: pd.DataFrame, hourly_df: pd.DataFrame) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    fixed_mae = float("nan")
+
+    for mode in MODE_ORDER:
+        if mode not in set(hourly_df["mode"]):
+            continue
+
+        mode_df = detailed_df[(detailed_df["mode"] == mode) & detailed_df["is_test"]]
+        metrics = evaluate_refined_predictions(
+            y_true=mode_df["true_value"].to_numpy(dtype=float),
+            y_pred=mode_df["refined_pred"].to_numpy(dtype=float),
+        )
+        if mode == "fixed":
+            fixed_mae = metrics["MAE"]
+
+        mode_hourly = hourly_df[hourly_df["mode"] == mode]
+        rows.append(
+            {
+                "mode": mode,
+                "Model": MODE_SPECS[mode]["model"],
+                "Description": MODE_SPECS[mode]["description"],
+                "MAE": metrics["MAE"],
+                "RMSE": metrics["RMSE"],
+                "MSE": metrics["MSE"],
+                "Std hourly MAE": float(mode_hourly["test_mae"].std(ddof=0)),
+                "Mean w_prior": float(mode_hourly["w_prior"].mean()),
+                "Mean w_stability": float(mode_hourly["w_stability"].mean()),
+                "Mean w_neighbourhood": float(mode_hourly["w_neighbourhood"].mean()),
+            }
+        )
+
+    summary_df = pd.DataFrame(rows)
+    if np.isfinite(fixed_mae) and fixed_mae != 0.0:
+        summary_df["MAE improvement over fixed (%)"] = (
+            (fixed_mae - summary_df["MAE"]) / fixed_mae * 100.0
+        )
+    else:
+        summary_df["MAE improvement over fixed (%)"] = np.nan
+    return summary_df
+
+
+def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    set_random_seed(args.seed)
+    if args.clean_checkpoints:
+        clean_checkpoint_dir(args.checkpoint_dir)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("CUDA available:", torch.cuda.is_available())
+    print("Using device:", device)
+    print("Checkpoint dir:", args.checkpoint_dir)
+
+    df, lookup_df, graph = load_required_data(
+        data_path=args.data,
+        lookup_path=args.lookup,
+        edge_csv=args.edge_csv,
+        excluded_zones=args.excluded_zones,
+    )
+    zones = select_zones(df, graph, args.max_zones)
+    print("Graph-compatible zones selected:", len(zones))
+
+    zone_hourly_counts = build_zone_hourly_counts(df)
+    adjacency = build_zone_adjacency(args.edge_csv, lookup_df)
+
+    manager_cfg = ManagerConfig(M_mc_test=args.mc_samples)
+    manager = MultiScaleModelManager(checkpoint_dir=str(args.checkpoint_dir), cfg=manager_cfg)
+    gnn_cfg = GNNTrainingConfig(
+        hidden_dim=args.gnn_hidden_dim,
+        dropout=args.gnn_dropout,
+        learning_rate=args.gnn_lr,
+        epochs=args.gnn_epochs,
+        patience=args.gnn_patience,
+    )
+
+    detailed_frames: List[pd.DataFrame] = []
+    hourly_records: List[Dict[str, object]] = []
+
+    for step in range(args.rolling_steps):
+        target_hour = args.start_target + pd.Timedelta(hours=step)
+        print(f"\n///// Experiment 4 target hour: {target_hour} step {step} /////")
+
+        baseline_df = run_multiscale_temporal_baseline(
+            df=df,
+            manager=manager,
+            target_hour=target_hour,
+            zones=zones,
+            zone_hourly_counts=zone_hourly_counts,
+        )
+        history_df = df[df["datetime"] < target_hour]
+        step_df = compute_confidence_components(
+            step_df=baseline_df,
+            history_df=history_df,
+            adjacency=adjacency,
+        )
+        data = build_gnn_features(step_df=step_df, graph=graph)
+        splits = make_node_splits(
+            node_count=data.num_nodes,
+            seed=args.seed + step,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+        )
+
+        hour_messages: List[str] = []
+        for mode in args.modes:
+            prediction_df, hourly_record = run_single_mode(
+                target_hour=target_hour,
+                mode=mode,
+                data=data,
+                splits=splits,
+                device=device,
+                cfg=gnn_cfg,
+                seed=args.seed + step * 100 + MODE_ORDER.index(mode),
+                grid_step=args.grid_step,
+                random_candidates=args.random_candidates,
+                learned_entropy=args.learned_entropy,
+            )
+            detailed_frames.append(prediction_df)
+            hourly_records.append(hourly_record)
+            weights = np.array(
+                [
+                    hourly_record["w_prior"],
+                    hourly_record["w_stability"],
+                    hourly_record["w_neighbourhood"],
+                ],
+                dtype=np.float32,
+            )
+            hour_messages.append(
+                f"{mode} test_MAE={hourly_record['test_mae']:.4f} "
+                f"({format_weights(weights)})"
+            )
+
+        print(f"[{target_hour}] " + ", ".join(hour_messages))
+
+    detailed_df = pd.concat(detailed_frames, ignore_index=True)
+    hourly_df = pd.DataFrame(hourly_records)
+    summary_df = summarize_results(detailed_df=detailed_df, hourly_df=hourly_df)
+    return summary_df, detailed_df, hourly_df
+
+def save_results(
+    summary_df: pd.DataFrame,
+    detailed_df: pd.DataFrame,
+    hourly_df: pd.DataFrame,
+    results_dir: Path,
+    make_plot: bool,
+) -> None:
+    results_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = results_dir / "experiment_4_confidence_weight_optimization_summary.csv"
+    detailed_path = results_dir / "experiment_4_confidence_weight_optimization_detailed.csv"
+    hourly_path = results_dir / "experiment_4_confidence_weight_optimization_hourly.csv"
+    plot_path = results_dir / "experiment_4_confidence_weight_optimization_metrics.png"
+
+    summary_df.to_csv(summary_path, index=False)
+    detailed_df.to_csv(detailed_path, index=False)
+    hourly_df.to_csv(hourly_path, index=False)
+
+    plot_written = False
+    if make_plot:
+        try:
+            plot_metrics(summary_df=summary_df, hourly_df=hourly_df, plot_path=plot_path)
+            plot_written = True
+        except ModuleNotFoundError as exc:
+            print(f"Plot skipped because optional dependency is missing: {exc}")
+
+    print(f"\nSaved summary to {summary_path}")
+    print(f"Saved detailed predictions to {detailed_path}")
+    print(f"Saved hourly records to {hourly_path}")
+    if plot_written:
+        print(f"Saved plot to {plot_path}")
+
+
+def plot_metrics(summary_df: pd.DataFrame, hourly_df: pd.DataFrame, plot_path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    models = summary_df["Model"].tolist()
+    x = np.arange(len(models))
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    axes[0].bar(x, summary_df["MAE"], label="MAE")
+    axes[0].set_title("Overall Test MAE")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(models, rotation=18, ha="right")
+    axes[0].grid(axis="y", linestyle="--", alpha=0.4)
+
+    axes[1].bar(x - 0.25, summary_df["Mean w_prior"], 0.25, label="prior")
+    axes[1].bar(x, summary_df["Mean w_stability"], 0.25, label="stability")
+    axes[1].bar(x + 0.25, summary_df["Mean w_neighbourhood"], 0.25, label="neighbourhood")
+    axes[1].set_title("Mean Selected Weights")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(models, rotation=18, ha="right")
+    axes[1].grid(axis="y", linestyle="--", alpha=0.4)
+    axes[1].legend()
+
+    for mode in MODE_ORDER:
+        mode_df = hourly_df[hourly_df["mode"] == mode].sort_values("target_hour")
+        if mode_df.empty:
+            continue
+        axes[2].plot(
+            pd.to_datetime(mode_df["target_hour"]),
+            mode_df["test_mae"],
+            marker="o",
+            linewidth=1.5,
+            label=MODE_SPECS[mode]["model"],
+        )
+    axes[2].set_title("Hourly Test MAE")
+    axes[2].tick_params(axis="x", rotation=30)
+    axes[2].grid(axis="y", linestyle="--", alpha=0.4)
+    axes[2].legend(fontsize=8)
+
+    fig.suptitle("Experiment 4: Confidence Weight Optimization")
+    fig.tight_layout()
+    fig.savefig(plot_path, dpi=200)
+    plt.close(fig)
+
+
+def print_summary_table(summary_df: pd.DataFrame) -> None:
+    display_columns = [
+        "Model",
+        "MAE",
+        "RMSE",
+        "MSE",
+        "Mean w_prior",
+        "Mean w_stability",
+        "Mean w_neighbourhood",
+        "MAE improvement over fixed (%)",
+    ]
+    display_df = summary_df[display_columns].copy()
+    for column in display_columns[1:]:
+        display_df[column] = display_df[column].map(
+            lambda value: f"{value:.4f}" if np.isfinite(value) else "nan"
+        )
+    print("\nFinal Summary Table")
+    print(display_df.to_string(index=False))
+
+
+def main() -> None:
+    args = parse_args()
+    summary_df, detailed_df, hourly_df = run_experiment(args)
+    save_results(
+        summary_df=summary_df,
+        detailed_df=detailed_df,
+        hourly_df=hourly_df,
+        results_dir=args.results_dir,
+        make_plot=not args.no_plot,
+    )
+    print_summary_table(summary_df)
+
+
+if __name__ == "__main__":
+    main()
