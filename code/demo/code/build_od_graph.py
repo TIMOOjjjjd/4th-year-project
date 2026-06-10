@@ -382,7 +382,7 @@ def parse_args() -> argparse.Namespace:
         "--template",
         type=Path,
         default=BASE_DIR / "edge_weight_matrix_with_flow.csv",
-        help="Use this existing matrix to preserve row/column zone order.",
+        help="For OD graphs, use this existing matrix to preserve row/column zone order.",
     )
     parser.add_argument(
         "--use-lookup-zones",
@@ -427,8 +427,8 @@ def parse_args() -> argparse.Namespace:
         choices=["edge_count", "per_origin_top_k"],
         default="edge_count",
         help=(
-            "For random graphs, either match a total edge count or sample top-k "
-            "outgoing destinations per origin."
+            "For random graphs, either sample a total edge count from all node pairs "
+            "or sample top-k outgoing destinations per origin."
         ),
     )
     parser.add_argument(
@@ -437,7 +437,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Total random directed edges for --random-mode edge_count. If omitted, "
-            "uses --random-reference, then --template, then --top-k."
+            "uses --random-reference when provided, otherwise len(nodes) * --top-k."
         ),
     )
     parser.add_argument(
@@ -445,8 +445,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Matrix whose positive edge count or weights define the random baseline. "
-            "Defaults to --template when available."
+            "Optional matrix whose positive edge count or weights define the random baseline."
         ),
     )
     parser.add_argument(
@@ -502,16 +501,16 @@ def main() -> None:
     if args.random_edge_count is not None and args.random_edge_count < 0:
         raise ValueError("--random-edge-count must be >= 0")
 
-    template_path = None if args.use_lookup_zones else args.template
+    template_path = (
+        None
+        if args.graph_type == "random" or args.use_lookup_zones
+        else args.template
+    )
     zone_names = _load_zone_names(args.lookup, template_path)
 
     kept_rows = None
     if args.graph_type == "random":
-        reference_path = (
-            args.random_reference
-            if args.random_reference is not None
-            else template_path
-        )
+        reference_path = args.random_reference
         reference = (
             _align_reference_matrix(reference_path, zone_names)
             if reference_path is not None

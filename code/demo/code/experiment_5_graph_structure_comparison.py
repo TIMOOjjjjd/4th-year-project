@@ -6,7 +6,7 @@ pipeline. The only variable is the graph structure:
     no_graph: temporal baseline only, no residual GNN
     od:       residual GraphSAGE on the OD-flow graph
     geo:      residual GraphSAGE on the geographic graph
-    random:   residual GraphSAGE on a random graph baseline
+    random:   residual GraphSAGE on random graph baselines across fixed seeds
 
 All graph variants use Experiment 3's learned-softmax confidence-weighted
 residual loss.
@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from build_od_graph import _build_random_matrix, _load_zone_names
 from experiment_3_confidence_weighted_gnn_ablation import (
     BASE_DIR,
     DEFAULT_DATA_PATH,
@@ -53,8 +54,8 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 GRAPH_CONFIDENCE_MODE = "learned_softmax"
 DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_with_flow.csv"
-DEFAULT_RANDOM_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_random.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_5_multiscale"
+DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class GraphSpec:
     model_name: str
     description: str
     edge_csv: Optional[Path]
+    random_seed: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
     parser.add_argument("--od-edge-csv", type=Path, default=DEFAULT_OD_EDGE_MATRIX)
     parser.add_argument("--geo-edge-csv", type=Path, default=DEFAULT_GEO_EDGE_MATRIX)
-    parser.add_argument("--random-edge-csv", type=Path, default=DEFAULT_RANDOM_EDGE_MATRIX)
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
@@ -103,6 +104,43 @@ def parse_args() -> argparse.Namespace:
         help="Subset and order of graph variants to evaluate.",
     )
     parser.add_argument(
+        "--random-seeds",
+        type=int,
+        nargs="*",
+        default=DEFAULT_RANDOM_SEEDS,
+        help="Fixed seeds used to generate random graph baselines.",
+    )
+    parser.add_argument(
+        "--random-mode",
+        choices=["edge_count", "per_origin_top_k"],
+        default="per_origin_top_k",
+        help="Random graph construction mode reused from build_od_graph.py.",
+    )
+    parser.add_argument(
+        "--random-top-k",
+        type=int,
+        default=10,
+        help="Random outgoing destinations per node, or edge-count fallback multiplier.",
+    )
+    parser.add_argument(
+        "--random-edge-count",
+        type=int,
+        default=None,
+        help="Total random edges for --random-mode edge_count.",
+    )
+    parser.add_argument(
+        "--random-weight-mode",
+        choices=["binary", "uniform"],
+        default="binary",
+        help="Random edge weights. GNN currently uses nonzero topology, not edge weights.",
+    )
+    parser.add_argument(
+        "--random-graph-dir",
+        type=Path,
+        default=None,
+        help="Directory for generated random graph CSVs. Defaults to results/random_graphs.",
+    )
+    parser.add_argument(
         "--clean-checkpoints",
         action="store_true",
         help="Delete this experiment's temporal checkpoint directory before running.",
@@ -121,11 +159,22 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if not args.graph_types:
         parser.error("--graph-types requires at least one graph type when provided.")
+    if "random" in args.graph_types and not args.random_seeds:
+        parser.error("--random-seeds requires at least one seed when random is selected.")
+    if args.random_top_k < 0:
+        parser.error("--random-top-k must be >= 0.")
+    if args.random_edge_count is not None and args.random_edge_count < 0:
+        parser.error("--random-edge-count must be >= 0.")
     return args
 
 
-def graph_specs(args: argparse.Namespace) -> Dict[str, GraphSpec]:
-    return {
+def build_graph_specs(args: argparse.Namespace) -> Tuple[Dict[str, GraphSpec], List[str]]:
+    random_graph_dir = (
+        args.random_graph_dir
+        if args.random_graph_dir is not None
+        else args.results_dir / "random_graphs"
+    )
+    base_specs = {
         "no_graph": GraphSpec(
             key="no_graph",
             model_name="No Graph Temporal",
@@ -144,13 +193,62 @@ def graph_specs(args: argparse.Namespace) -> Dict[str, GraphSpec]:
             description="Experiment 3 learned-softmax GraphSAGE on geographic graph",
             edge_csv=args.geo_edge_csv,
         ),
-        "random": GraphSpec(
-            key="random",
-            model_name="Random Graph",
-            description="Experiment 3 learned-softmax GraphSAGE on random graph",
-            edge_csv=args.random_edge_csv,
-        ),
     }
+    specs: Dict[str, GraphSpec] = {}
+    graph_order: List[str] = []
+    for graph_type in dict.fromkeys(args.graph_types):
+        if graph_type != "random":
+            specs[graph_type] = base_specs[graph_type]
+            graph_order.append(graph_type)
+            continue
+
+        for seed in args.random_seeds:
+            key = f"random_seed_{int(seed)}"
+            specs[key] = GraphSpec(
+                key=key,
+                model_name=f"Random Graph seed={int(seed)}",
+                description=(
+                    "Experiment 3 learned-softmax GraphSAGE on a generated "
+                    f"random graph, seed={int(seed)}"
+                ),
+                edge_csv=random_graph_dir / f"edge_weight_matrix_random_seed_{int(seed)}.csv",
+                random_seed=int(seed),
+            )
+            graph_order.append(key)
+    return specs, graph_order
+
+
+def generate_random_graphs(
+    args: argparse.Namespace,
+    specs: Dict[str, GraphSpec],
+    graph_order: Sequence[str],
+) -> None:
+    random_specs = [specs[key] for key in graph_order if specs[key].random_seed is not None]
+    if not random_specs:
+        return
+
+    zone_names = _load_zone_names(args.lookup, template_path=None)
+    for spec in random_specs:
+        if spec.edge_csv is None or spec.random_seed is None:
+            continue
+        spec.edge_csv.parent.mkdir(parents=True, exist_ok=True)
+        matrix = _build_random_matrix(
+            zone_names=zone_names,
+            random_mode=args.random_mode,
+            random_edge_count=args.random_edge_count,
+            top_k=args.random_top_k,
+            include_self=False,
+            random_seed=spec.random_seed,
+            random_weight_mode=args.random_weight_mode,
+            symmetrize="none",
+            reference=None,
+        )
+        matrix.to_csv(spec.edge_csv, encoding="utf-8")
+        edge_count = int((matrix.to_numpy(dtype=float) > 0.0).sum())
+        print(
+            f"Generated {spec.key} at {spec.edge_csv} "
+            f"with {edge_count} nonzero edges."
+        )
 
 
 def load_taxi_data(data_path: Path, excluded_zones: Sequence[int]) -> pd.DataFrame:
@@ -307,6 +405,7 @@ def collect_no_graph_predictions(
     rows["mode"] = spec.key
     rows["experiment_3_mode"] = "none"
     rows["Model"] = spec.model_name
+    rows["random_seed"] = np.nan
     rows["residual_target"] = rows["true_value"] - rows["base_pred"]
     rows["residual_pred"] = 0.0
     rows["refined_pred"] = rows["base_pred"]
@@ -321,6 +420,7 @@ def collect_no_graph_predictions(
             "mode",
             "experiment_3_mode",
             "Model",
+            "random_seed",
             "PULocationID",
             "split",
             "is_test",
@@ -356,6 +456,7 @@ def hourly_record_from_predictions(
         "mode": spec.key,
         "experiment_3_mode": predictions["experiment_3_mode"].iloc[0],
         "Model": spec.model_name,
+        "random_seed": spec.random_seed,
         "hourly_mae": metrics["MAE"],
         "hourly_rmse": metrics["RMSE"],
         "hourly_mse": metrics["MSE"],
@@ -394,11 +495,13 @@ def run_graph_variant(
     prediction_df["mode"] = graph_key
     prediction_df["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     prediction_df["Model"] = spec.model_name
+    prediction_df["random_seed"] = spec.random_seed
 
     hourly_record["graph_type"] = graph_key
     hourly_record["mode"] = graph_key
     hourly_record["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     hourly_record["Model"] = spec.model_name
+    hourly_record["random_seed"] = spec.random_seed
     return prediction_df, hourly_record
 
 
@@ -444,6 +547,7 @@ def summarize_results(
                 "graph_type": graph_key,
                 "Model": spec.model_name,
                 "Description": spec.description,
+                "random_seed": spec.random_seed,
                 "MAE": metrics["MAE"],
                 "RMSE": metrics["RMSE"],
                 "MSE": metrics["MSE"],
@@ -452,11 +556,45 @@ def summarize_results(
                     if not hourly_values.empty
                     else np.nan
                 ),
+                "Random seed MAE std": np.nan,
                 "MAE delta vs no_graph": mae_delta,
                 "MAE improvement vs no_graph (%)": mae_improvement_pct,
             }
         )
-    return pd.DataFrame(rows)
+    summary_df = pd.DataFrame(rows)
+    random_df = summary_df[summary_df["random_seed"].notna()]
+    if len(random_df) > 1:
+        mean_mae = float(random_df["MAE"].mean())
+        mean_rmse = float(random_df["RMSE"].mean())
+        mean_mse = float(random_df["MSE"].mean())
+        if np.isfinite(no_graph_mae) and not np.isclose(no_graph_mae, 0.0):
+            improvement_pct = (no_graph_mae - mean_mae) / no_graph_mae * 100.0
+        else:
+            improvement_pct = np.nan
+        summary_df = pd.concat(
+            [
+                summary_df,
+                pd.DataFrame(
+                    [
+                        {
+                            "graph_type": "random_mean",
+                            "Model": "Random Graph mean over seeds",
+                            "Description": "Mean over generated random graph seeds",
+                            "random_seed": np.nan,
+                            "MAE": mean_mae,
+                            "RMSE": mean_rmse,
+                            "MSE": mean_mse,
+                            "Std of hourly MAE": float(random_df["Std of hourly MAE"].mean()),
+                            "Random seed MAE std": float(random_df["MAE"].std(ddof=0)),
+                            "MAE delta vs no_graph": mean_mae - no_graph_mae,
+                            "MAE improvement vs no_graph (%)": improvement_pct,
+                        }
+                    ]
+                ),
+            ],
+            ignore_index=True,
+        )
+    return summary_df
 
 
 def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -464,8 +602,8 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     if args.clean_checkpoints:
         clean_checkpoint_dir(args.checkpoint_dir)
 
-    requested_graphs = list(dict.fromkeys(args.graph_types))
-    specs = graph_specs(args)
+    specs, requested_graphs = build_graph_specs(args)
+    generate_random_graphs(args=args, specs=specs, graph_order=requested_graphs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("CUDA available:", torch.cuda.is_available())
     print("Using device:", device)
@@ -629,6 +767,8 @@ def plot_metrics(summary_df: pd.DataFrame, hourly_df: pd.DataFrame, plot_path: P
         graph_hourly = hourly_df[hourly_df["graph_type"] == graph_key].sort_values(
             "target_hour"
         )
+        if graph_hourly.empty:
+            continue
         model_name = summary_df.loc[summary_df["graph_type"] == graph_key, "Model"].iloc[0]
         axes[2].plot(
             pd.to_datetime(graph_hourly["target_hour"]),
@@ -655,6 +795,7 @@ def print_summary_table(summary_df: pd.DataFrame) -> None:
         "RMSE",
         "MSE",
         "Std of hourly MAE",
+        "Random seed MAE std",
         "MAE improvement vs no_graph (%)",
     ]
     display_df = summary_df[columns].copy()
