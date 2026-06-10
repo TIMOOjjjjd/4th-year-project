@@ -35,6 +35,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.utils import dense_to_sparse
 
