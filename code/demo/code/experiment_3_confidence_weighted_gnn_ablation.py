@@ -17,6 +17,7 @@ Compared modes:
     stability_only: MC-variance stability only
     history_consistency_only: 24h/168h/720h historical mean consistency only
     full: fixed prior/stability/history-consistency weights from Experiment 2
+    learned_softmax: trainable softmax weights over the three confidence components
 """
 
 from __future__ import annotations
@@ -40,6 +41,12 @@ from torch_geometric.utils import dense_to_sparse
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp") / "matplotlib-cache"))
 
+from confidence_softmax import (
+    CONFIDENCE_COMPONENT_NAMES,
+    DEFAULT_CONFIDENCE_WEIGHTS,
+    combine_confidence_components,
+    confidence_from_component_weights,
+)
 from gnn_model import MultiScaleGraphSAGE
 from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
 
@@ -72,9 +79,8 @@ HISTORY_FEATURES = list(HISTORY_WINDOWS.keys())
 HISTORY_CONSISTENCY_TAU = 1.0
 
 CONFIDENCE_WEIGHTS = {
-    "prior": 0.3,
-    "stability": 0.4,
-    "history_consistency": 0.3,
+    name: float(weight)
+    for name, weight in zip(CONFIDENCE_COMPONENT_NAMES, DEFAULT_CONFIDENCE_WEIGHTS)
 }
 
 ABLATION_MODES = {
@@ -101,6 +107,10 @@ ABLATION_MODES = {
             "0.3/0.4/0.3"
         ),
     },
+    "learned_softmax": {
+        "model": "GNN + learned softmax confidence",
+        "description": "learn prior/stability/history-consistency weights jointly with GraphSAGE",
+    },
 }
 MODE_ORDER = [
     "none",
@@ -108,6 +118,7 @@ MODE_ORDER = [
     "stability_only",
     "history_consistency_only",
     "full",
+    "learned_softmax",
 ]
 
 
@@ -150,6 +161,7 @@ class GNNResult:
     refined_pred: np.ndarray
     best_epoch: int
     best_val_loss: float
+    confidence_weights: Optional[np.ndarray] = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -480,15 +492,15 @@ def compute_confidence_components(
             default=0.6,
         )
     )
-    step_df["full_confidence"] = (
-        np.exp(
-            CONFIDENCE_WEIGHTS["prior"] * np.log(step_df["prior_score"].clip(0.05, 1.0))
-            + CONFIDENCE_WEIGHTS["stability"]
-            * np.log(step_df["stability_score"].clip(0.05, 1.0))
-            + CONFIDENCE_WEIGHTS["history_consistency"]
-            * np.log(step_df["history_consistency_score"].clip(0.05, 1.0))
-        )
-    ).map(lambda value: clamp_score(float(value), default=0.5))
+    step_df["full_confidence"] = step_df.apply(
+        lambda row: combine_confidence_components(
+            prior=float(row.prior_score),
+            stability=float(row.stability_score),
+            history_consistency=float(row.history_consistency_score),
+            weights=CONFIDENCE_WEIGHTS,
+        ),
+        axis=1,
+    )
     return step_df
 
 
@@ -606,6 +618,8 @@ def get_sample_weights(mode: str, data: Data) -> torch.Tensor:
         weights = data.history_consistency_score
     elif mode == "full":
         weights = data.full_confidence
+    elif mode == "learned_softmax":
+        raise ValueError("learned_softmax weights are created during GNN training.")
     else:
         raise ValueError(f"Unsupported confidence weighting mode: {mode}")
     return weights.float().clamp(min=0.05, max=1.0)
@@ -677,12 +691,25 @@ def train_residual_gnn_with_weighted_loss(
     data_device = copy.deepcopy(data).to(device)
     train_mask = splits.train.to(device)
     val_mask = splits.val.to(device)
-    sample_weight = get_sample_weights(mode, data_device)
+    sample_weight = (
+        torch.ones_like(data_device.y)
+        if mode == "learned_softmax"
+        else get_sample_weights(mode, data_device)
+    )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    logits: Optional[nn.Parameter] = None
+    optimizer_params = list(model.parameters())
+    if mode == "learned_softmax":
+        logits = nn.Parameter(
+            torch.log(torch.tensor(DEFAULT_CONFIDENCE_WEIGHTS, dtype=torch.float32)).to(device)
+        )
+        optimizer_params.append(logits)
+
+    optimizer = torch.optim.Adam(optimizer_params, lr=cfg.learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
 
     best_state: Optional[Dict[str, torch.Tensor]] = None
+    best_logits: Optional[torch.Tensor] = None
     best_epoch = 0
     best_val_loss = float("inf")
     patience_counter = 0
@@ -693,6 +720,9 @@ def train_residual_gnn_with_weighted_loss(
         residual_pred, _ = model(data_device)
 
         loss_per_node = (residual_pred[train_mask] - data_device.y[train_mask]) ** 2
+        if logits is not None:
+            current_weights = torch.softmax(logits, dim=0)
+            sample_weight = confidence_from_component_weights(data_device, current_weights)
         train_weight = sample_weight[train_mask]
         train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
         loss = (train_weight * loss_per_node).mean()
@@ -710,6 +740,8 @@ def train_residual_gnn_with_weighted_loss(
             best_val_loss = val_loss_value
             best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
+            if logits is not None:
+                best_logits = logits.detach().clone()
             patience_counter = 0
         else:
             patience_counter += 1
@@ -718,6 +750,14 @@ def train_residual_gnn_with_weighted_loss(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+    if logits is not None and best_logits is not None:
+        logits.data.copy_(best_logits)
+
+    learned_weights = (
+        torch.softmax(logits.detach(), dim=0).cpu().numpy()
+        if logits is not None
+        else None
+    )
 
     model.eval()
     with torch.no_grad():
@@ -728,6 +768,7 @@ def train_residual_gnn_with_weighted_loss(
         refined_pred=refined_pred.detach().cpu().numpy(),
         best_epoch=best_epoch,
         best_val_loss=best_val_loss,
+        confidence_weights=learned_weights,
     )
 
 
@@ -771,6 +812,11 @@ def collect_node_predictions(
     result: GNNResult,
 ) -> pd.DataFrame:
     split_label = split_labels(splits)
+    learned_weights = (
+        result.confidence_weights
+        if result.confidence_weights is not None
+        else np.full(len(CONFIDENCE_COMPONENT_NAMES), np.nan, dtype=np.float32)
+    )
     return pd.DataFrame(
         {
             "target_hour": target_hour,
@@ -789,6 +835,9 @@ def collect_node_predictions(
             "stability_score": data.stability_score.cpu().numpy(),
             "history_consistency_score": data.history_consistency_score.cpu().numpy(),
             "full_confidence": data.full_confidence.cpu().numpy(),
+            "w_prior": float(learned_weights[0]),
+            "w_stability": float(learned_weights[1]),
+            "w_history_consistency": float(learned_weights[2]),
             "best_epoch": result.best_epoch,
             "best_val_loss": result.best_val_loss,
         }
@@ -814,7 +863,13 @@ def run_single_ablation(
         cfg=cfg,
         seed=seed,
     )
-    sample_weight = get_sample_weights(mode, data)
+    if result.confidence_weights is not None:
+        sample_weight = confidence_from_component_weights(
+            data,
+            torch.tensor(result.confidence_weights, dtype=torch.float32),
+        )
+    else:
+        sample_weight = get_sample_weights(mode, data)
     prediction_df = collect_node_predictions(
         target_hour=target_hour,
         mode=mode,
@@ -841,6 +896,21 @@ def run_single_ablation(
         "n_test": int(splits.test.sum().item()),
         "best_epoch": result.best_epoch,
         "best_val_loss": result.best_val_loss,
+        "w_prior": (
+            float(result.confidence_weights[0])
+            if result.confidence_weights is not None
+            else np.nan
+        ),
+        "w_stability": (
+            float(result.confidence_weights[1])
+            if result.confidence_weights is not None
+            else np.nan
+        ),
+        "w_history_consistency": (
+            float(result.confidence_weights[2])
+            if result.confidence_weights is not None
+            else np.nan
+        ),
     }
     return prediction_df, hourly_record
 

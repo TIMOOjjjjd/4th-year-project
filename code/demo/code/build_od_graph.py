@@ -488,7 +488,13 @@ def main() -> None:
             else "edge_weight_matrix_od.csv"
         )
     if args.output.exists() and not args.overwrite:
-        raise FileExistsError(f"Output exists; pass --overwrite to replace it: {args.output}")
+        raise SystemExit(
+            f"Output already exists: {args.output}\n"
+            "Pass --overwrite if you want to replace it, or pass --output to write "
+            "a new file.\n"
+            "For a random graph, use: --graph-type random "
+            "--output edge_weight_matrix_random.csv --overwrite"
+        )
     if args.top_k < 0:
         raise ValueError("--top-k must be >= 0")
     if args.min_flow < 1:

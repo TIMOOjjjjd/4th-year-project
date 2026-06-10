@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from confidence_softmax import DEFAULT_CONFIDENCE_WEIGHTS, combine_confidence_components
 from gnn_model import run_gnn_pipeline
 
 MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", or "multiscale"
@@ -174,18 +175,14 @@ def _combine_confidence_components(
     prior: float,
     stability: float,
     history_consistency: float,
-    weights: Dict[str, float],
+    weights,
 ) -> float:
-    prior_c = np.clip(prior, 0.05, 1.0)
-    stability_c = np.clip(stability, 0.05, 1.0)
-    history_c = np.clip(history_consistency, 0.05, 1.0)
-
-    log_score = (
-        weights["prior"] * np.log(prior_c)
-        + weights["stability"] * np.log(stability_c)
-        + weights["history_consistency"] * np.log(history_c)
+    return combine_confidence_components(
+        prior=prior,
+        stability=stability,
+        history_consistency=history_consistency,
+        weights=weights,
     )
-    return float(np.clip(np.exp(log_score), 0.05, 1.0))
 
 
 def _assign_confidence_scores(
@@ -194,7 +191,7 @@ def _assign_confidence_scores(
 ) -> Dict[int, float]:
     stability_scores = _compute_stability_scores(step_df)
     history_scores = _compute_history_consistency_scores(step_df)
-    weights = {"prior": 0.3, "stability": 0.4, "history_consistency": 0.3}
+    weights = DEFAULT_CONFIDENCE_WEIGHTS
 
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
@@ -214,6 +211,12 @@ def _assign_confidence_scores(
         )
         zone_confidence[zid] = combined
 
+    step_df["prior_score"] = step_df["PULocationID"].map(
+        lambda zid: prior_scores.get(int(zid), 0.4)
+    )
+    step_df["stability_score"] = step_df["PULocationID"].map(
+        lambda zid: stability_scores.get(int(zid), 0.5)
+    )
     step_df["history_consistency_score"] = step_df["PULocationID"].map(
         lambda zid: history_scores.get(int(zid), 0.6)
     )
@@ -228,6 +231,9 @@ def _build_gnn_input_frame(step_df: pd.DataFrame) -> pd.DataFrame:
         "y_pred": "Prediction",
         "y_true": "True Value",
         "confidence": "Confidence",
+        "prior_score": "PriorScore",
+        "stability_score": "StabilityScore",
+        "history_consistency_score": "HistoryConsistencyScore",
     }
     gnn_frame = step_df.rename(columns=rename_map)
     cols = [
@@ -236,6 +242,9 @@ def _build_gnn_input_frame(step_df: pd.DataFrame) -> pd.DataFrame:
         "Prediction",
         "True Value",
         "Confidence",
+        "PriorScore",
+        "StabilityScore",
+        "HistoryConsistencyScore",
         *HISTORY_FEATURES,
     ]
     return gnn_frame[[col for col in cols if col in gnn_frame.columns]]
@@ -367,6 +376,9 @@ def run_rolling_with_gnn(
                 "MSE_GRU": gnn_metric["mse_gru"],
                 "MAE_GNN": gnn_metric["mae_refined"],
                 "MSE_GNN": gnn_metric["mse_refined"],
+                "w_prior": gnn_metric.get("w_prior", np.nan),
+                "w_stability": gnn_metric.get("w_stability", np.nan),
+                "w_history_consistency": gnn_metric.get("w_history_consistency", np.nan),
             }
         )
 

@@ -6,6 +6,9 @@ adds two residual GNN variants on top:
 T4: Multi-scale temporal only
 G1: Multi-scale + GraphSAGE residual correction
 G2: Multi-scale + GraphSAGE residual correction + historical mean features
+
+G1/G2 use learned-softmax confidence weighting over prior, stability, and
+history-consistency components in the residual loss.
 """
 
 from __future__ import annotations
@@ -30,6 +33,11 @@ from torch_geometric.utils import dense_to_sparse
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp") / "matplotlib-cache"))
 
+from confidence_softmax import (
+    DEFAULT_CONFIDENCE_WEIGHTS,
+    combine_confidence_components,
+    confidence_from_component_weights,
+)
 from gnn_model import MultiScaleGraphSAGE
 from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
 
@@ -116,6 +124,7 @@ class GNNResult:
     refined_pred: np.ndarray
     best_epoch: int
     best_val_loss: float
+    confidence_weights: Optional[np.ndarray] = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -320,30 +329,12 @@ def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float
     return scores
 
 
-def combine_confidence_components(
-    prior: float,
-    stability: float,
-    history_consistency: float,
-    weights: Dict[str, float],
-) -> float:
-    prior_c = np.clip(prior, 0.05, 1.0)
-    stability_c = np.clip(stability, 0.05, 1.0)
-    history_c = np.clip(history_consistency, 0.05, 1.0)
-    log_score = (
-        weights["prior"] * np.log(prior_c)
-        + weights["stability"] * np.log(stability_c)
-        + weights["history_consistency"] * np.log(history_c)
-    )
-    return float(np.clip(np.exp(log_score), 0.05, 1.0))
-
-
 def assign_confidence_scores(
     step_df: pd.DataFrame,
     prior_scores: Dict[int, float],
 ) -> Dict[int, float]:
     stability_scores = compute_stability_scores(step_df)
     history_scores = compute_history_consistency_scores(step_df)
-    weights = {"prior": 0.3, "stability": 0.4, "history_consistency": 0.3}
 
     zone_confidence: Dict[int, float] = {}
     for row in step_df.itertuples():
@@ -356,10 +347,16 @@ def assign_confidence_scores(
             prior=prior_scores.get(zone_id, 0.4),
             stability=stability_scores.get(zone_id, 0.5),
             history_consistency=history_scores.get(zone_id, 0.6),
-            weights=weights,
+            weights=DEFAULT_CONFIDENCE_WEIGHTS,
         )
         zone_confidence[zone_id] = combined
 
+    step_df["prior_score"] = step_df["PULocationID"].map(
+        lambda zone_id: prior_scores.get(int(zone_id), 0.4)
+    )
+    step_df["stability_score"] = step_df["PULocationID"].map(
+        lambda zone_id: stability_scores.get(int(zone_id), 0.5)
+    )
     step_df["history_consistency_score"] = step_df["PULocationID"].map(
         lambda zone_id: history_scores.get(int(zone_id), 0.6)
     )
@@ -451,6 +448,9 @@ def build_gnn_data(
     node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
     node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
     node_confidence = torch.full((node_count,), 0.2, dtype=torch.float32)
+    prior_score = torch.full((node_count,), 0.4, dtype=torch.float32)
+    stability_score = torch.full((node_count,), 0.5, dtype=torch.float32)
+    history_score = torch.full((node_count,), 0.6, dtype=torch.float32)
     history_tensor = torch.full((node_count, len(HISTORY_FEATURES)), 0.0, dtype=torch.float32)
 
     for row in step_df.itertuples():
@@ -465,6 +465,9 @@ def build_gnn_data(
         node_pred[node_idx] = float(row.base_pred)
         node_label[node_idx] = float(row.true_value)
         node_confidence[node_idx] = float(np.clip(row.confidence, 0.0, 1.0))
+        prior_score[node_idx] = float(np.clip(row.prior_score, 0.05, 1.0))
+        stability_score[node_idx] = float(np.clip(row.stability_score, 0.05, 1.0))
+        history_score[node_idx] = float(np.clip(row.history_consistency_score, 0.05, 1.0))
         for feature_idx, feature_name in enumerate(HISTORY_FEATURES):
             value = getattr(row, feature_name, 0.0)
             history_tensor[node_idx, feature_idx] = 0.0 if pd.isna(value) else float(value)
@@ -478,6 +481,9 @@ def build_gnn_data(
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
     node_confidence = node_confidence[valid_indices]
+    prior_score = prior_score[valid_indices]
+    stability_score = stability_score[valid_indices]
+    history_score = history_score[valid_indices]
     history_tensor = history_tensor[valid_indices]
 
     feature_tensors = []
@@ -509,6 +515,9 @@ def build_gnn_data(
         base_pred=node_pred,
         true_value=node_label,
         confidence=node_confidence,
+        prior_score=prior_score,
+        stability_score=stability_score,
+        history_consistency_score=history_score,
     )
     data.zone_names = tuple(zone_names)
     data.location_ids = tuple(location_ids)
@@ -597,11 +606,18 @@ def train_residual_gnn(
     train_mask = splits.train.to(device)
     val_mask = splits.val.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    logits = nn.Parameter(
+        torch.log(torch.tensor(DEFAULT_CONFIDENCE_WEIGHTS, dtype=torch.float32)).to(device)
+    )
+    optimizer = torch.optim.Adam(
+        list(model.parameters()) + [logits],
+        lr=cfg.learning_rate,
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
     loss_func = nn.SmoothL1Loss(reduction="none")
 
     best_state: Optional[Dict[str, torch.Tensor]] = None
+    best_logits: Optional[torch.Tensor] = None
     best_epoch = 0
     best_val_loss = float("inf")
     patience_counter = 0
@@ -612,7 +628,8 @@ def train_residual_gnn(
         residual_pred, _ = model(data)
 
         loss_per_node = loss_func(residual_pred[train_mask], data.y[train_mask])
-        sample_weights = data.confidence[train_mask].clamp(min=0.05)
+        confidence_weights = torch.softmax(logits, dim=0)
+        sample_weights = confidence_from_component_weights(data, confidence_weights)[train_mask]
         sample_weights = sample_weights / sample_weights.mean().clamp(min=1e-6)
         loss = (loss_per_node * sample_weights).mean()
 
@@ -630,6 +647,7 @@ def train_residual_gnn(
             best_val_loss = val_loss_value
             best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
+            best_logits = logits.detach().clone()
             patience_counter = 0
         else:
             patience_counter += 1
@@ -638,6 +656,10 @@ def train_residual_gnn(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+    if best_logits is not None:
+        logits.data.copy_(best_logits)
+
+    learned_weights = torch.softmax(logits.detach(), dim=0).cpu().numpy()
 
     model.eval()
     with torch.no_grad():
@@ -648,6 +670,7 @@ def train_residual_gnn(
         refined_pred=refined_pred.detach().cpu().numpy(),
         best_epoch=best_epoch,
         best_val_loss=best_val_loss,
+        confidence_weights=learned_weights,
     )
 
 
@@ -673,7 +696,13 @@ def metrics_record(
     node_count: int,
     best_epoch: Optional[int] = None,
     best_val_loss: Optional[float] = None,
+    confidence_weights: Optional[np.ndarray] = None,
 ) -> Dict[str, object]:
+    weights = (
+        confidence_weights
+        if confidence_weights is not None
+        else np.full(3, np.nan, dtype=np.float32)
+    )
     return {
         "target_hour": target_hour,
         "model_id": model_id,
@@ -688,6 +717,9 @@ def metrics_record(
         "n_test": int(splits.test.sum().item()),
         "best_epoch": best_epoch,
         "best_val_loss": best_val_loss,
+        "w_prior": float(weights[0]),
+        "w_stability": float(weights[1]),
+        "w_history_consistency": float(weights[2]),
     }
 
 
@@ -942,6 +974,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 node_count=data_g1.num_nodes,
                 best_epoch=result_g1.best_epoch,
                 best_val_loss=result_g1.best_val_loss,
+                confidence_weights=result_g1.confidence_weights,
             )
         )
 
@@ -964,12 +997,18 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 node_count=data_g2.num_nodes,
                 best_epoch=result_g2.best_epoch,
                 best_val_loss=result_g2.best_val_loss,
+                confidence_weights=result_g2.confidence_weights,
             )
         )
 
+        g1_weights = result_g1.confidence_weights
+        g2_weights = result_g2.confidence_weights
         print(
             f"[{target_hour}] T4 MAE={metrics_t4['MAE']:.4f}, "
-            f"G1 MAE={metrics_g1['MAE']:.4f}, G2 MAE={metrics_g2['MAE']:.4f}"
+            f"G1 MAE={metrics_g1['MAE']:.4f} "
+            f"(w={g1_weights[0]:.3f}/{g1_weights[1]:.3f}/{g1_weights[2]:.3f}), "
+            f"G2 MAE={metrics_g2['MAE']:.4f} "
+            f"(w={g2_weights[0]:.3f}/{g2_weights[1]:.3f}/{g2_weights[2]:.3f})"
         )
 
     detailed_df = pd.DataFrame(detailed_records)

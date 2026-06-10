@@ -8,7 +8,8 @@ pipeline. The only variable is the graph structure:
     geo:      residual GraphSAGE on the geographic graph
     random:   residual GraphSAGE on a random graph baseline
 
-All graph variants use Experiment 3's "full" confidence-weighted residual loss.
+All graph variants use Experiment 3's learned-softmax confidence-weighted
+residual loss.
 For fairness, each rolling hour shares the same temporal predictions and the
 same location-based train/validation/test split across all graph structures.
 """
@@ -49,7 +50,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 )
 
 
-FULL_CONFIDENCE_MODE = "full"
+GRAPH_CONFIDENCE_MODE = "learned_softmax"
 DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_with_flow.csv"
 DEFAULT_RANDOM_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_random.csv"
@@ -134,19 +135,19 @@ def graph_specs(args: argparse.Namespace) -> Dict[str, GraphSpec]:
         "od": GraphSpec(
             key="od",
             model_name="OD Graph",
-            description="Experiment 3 full-confidence GraphSAGE on OD-flow graph",
+            description="Experiment 3 learned-softmax GraphSAGE on OD-flow graph",
             edge_csv=args.od_edge_csv,
         ),
         "geo": GraphSpec(
             key="geo",
             model_name="Geographic Graph",
-            description="Experiment 3 full-confidence GraphSAGE on geographic graph",
+            description="Experiment 3 learned-softmax GraphSAGE on geographic graph",
             edge_csv=args.geo_edge_csv,
         ),
         "random": GraphSpec(
             key="random",
             model_name="Random Graph",
-            description="Experiment 3 full-confidence GraphSAGE on random graph",
+            description="Experiment 3 learned-softmax GraphSAGE on random graph",
             edge_csv=args.random_edge_csv,
         ),
     }
@@ -381,7 +382,7 @@ def run_graph_variant(
     splits = masks_from_location_splits(data=data, split_sets=split_sets)
     prediction_df, hourly_record = run_single_ablation(
         target_hour=target_hour,
-        mode=FULL_CONFIDENCE_MODE,
+        mode=GRAPH_CONFIDENCE_MODE,
         data=data,
         splits=splits,
         device=device,
@@ -391,12 +392,12 @@ def run_graph_variant(
 
     prediction_df["graph_type"] = graph_key
     prediction_df["mode"] = graph_key
-    prediction_df["experiment_3_mode"] = FULL_CONFIDENCE_MODE
+    prediction_df["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     prediction_df["Model"] = spec.model_name
 
     hourly_record["graph_type"] = graph_key
     hourly_record["mode"] = graph_key
-    hourly_record["experiment_3_mode"] = FULL_CONFIDENCE_MODE
+    hourly_record["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     hourly_record["Model"] = spec.model_name
     return prediction_df, hourly_record
 

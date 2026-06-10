@@ -12,7 +12,17 @@ from torch_geometric.data import Data
 from torch_geometric.nn import SAGEConv
 from torch_geometric.utils import dense_to_sparse
 
+from confidence_softmax import (
+    DEFAULT_CONFIDENCE_WEIGHTS,
+    confidence_from_component_weights,
+)
+
 HISTORY_FEATURES = ["mean_24h", "mean_168h", "mean_720h"]
+CONFIDENCE_COMPONENT_COLUMNS = {
+    "prior_score": "PriorScore",
+    "stability_score": "StabilityScore",
+    "history_consistency_score": "HistoryConsistencyScore",
+}
 
 
 class MultiScaleGraphSAGE(nn.Module):
@@ -102,6 +112,12 @@ def _build_graph_snapshot(
         node_weights = torch.ones((node_count,), dtype=torch.float32)
     else:
         node_weights = fallback_weights.clone().to(dtype=torch.float32)
+    prior_score = torch.full((node_count,), 0.4, dtype=torch.float32)
+    stability_score = torch.full((node_count,), 0.5, dtype=torch.float32)
+    history_consistency_score = torch.full((node_count,), 0.6, dtype=torch.float32)
+    has_confidence_components = all(
+        column in df_pred.columns for column in CONFIDENCE_COMPONENT_COLUMNS.values()
+    )
     history_tensor = (
         torch.full((node_count, len(history_feature_cols)), float("nan"), dtype=torch.float32)
         if history_feature_cols
@@ -127,6 +143,16 @@ def _build_graph_snapshot(
             node_label[idx] = float(row["True Value"])
         if "Confidence" in df_pred.columns and pd.notna(row.get("Confidence")):
             node_weights[idx] = float(np.clip(row["Confidence"], 0.0, 1.0))
+        if has_confidence_components:
+            prior_val = row[CONFIDENCE_COMPONENT_COLUMNS["prior_score"]]
+            stability_val = row[CONFIDENCE_COMPONENT_COLUMNS["stability_score"]]
+            history_val = row[CONFIDENCE_COMPONENT_COLUMNS["history_consistency_score"]]
+            if pd.notna(prior_val):
+                prior_score[idx] = float(np.clip(prior_val, 0.05, 1.0))
+            if pd.notna(stability_val):
+                stability_score[idx] = float(np.clip(stability_val, 0.05, 1.0))
+            if pd.notna(history_val):
+                history_consistency_score[idx] = float(np.clip(history_val, 0.05, 1.0))
 
         if history_tensor is not None:
             values = []
@@ -147,6 +173,9 @@ def _build_graph_snapshot(
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
     node_weights = node_weights[valid_indices]
+    prior_score = prior_score[valid_indices]
+    stability_score = stability_score[valid_indices]
+    history_consistency_score = history_consistency_score[valid_indices]
     if history_tensor is not None:
         history_tensor = history_tensor[valid_indices]
         history_tensor = torch.nan_to_num(history_tensor, nan=0.0)
@@ -174,7 +203,11 @@ def _build_graph_snapshot(
         base_pred=node_pred,
         true_value=node_label,
         confidence=node_weights,
+        prior_score=prior_score,
+        stability_score=stability_score,
+        history_consistency_score=history_consistency_score,
     )
+    data.has_confidence_components = has_confidence_components
     data.zone_names = tuple(filtered_zone_names)
     data.location_ids = tuple(filtered_location_ids)
     return data
@@ -224,13 +257,23 @@ def _build_training_graph(
     y_parts: List[torch.Tensor] = []
     base_parts: List[torch.Tensor] = []
     confidence_parts: List[torch.Tensor] = []
+    prior_parts: List[torch.Tensor] = []
+    stability_parts: List[torch.Tensor] = []
+    history_confidence_parts: List[torch.Tensor] = []
     edge_parts: List[torch.Tensor] = []
+    has_confidence_components = True
     offset = 0
     for snapshot in snapshots:
         x_parts.append(snapshot.x)
         y_parts.append(snapshot.y)
         base_parts.append(snapshot.base_pred)
         confidence_parts.append(snapshot.confidence)
+        prior_parts.append(snapshot.prior_score)
+        stability_parts.append(snapshot.stability_score)
+        history_confidence_parts.append(snapshot.history_consistency_score)
+        has_confidence_components = (
+            has_confidence_components and bool(snapshot.has_confidence_components)
+        )
         if snapshot.edge_index.numel() > 0:
             edge_parts.append(snapshot.edge_index + offset)
         offset += snapshot.num_nodes
@@ -240,13 +283,18 @@ def _build_training_graph(
     else:
         combined_edge_index = torch.empty((2, 0), dtype=torch.long)
 
-    return Data(
+    data = Data(
         x=torch.cat(x_parts, dim=0),
         edge_index=combined_edge_index,
         y=torch.cat(y_parts, dim=0),
         base_pred=torch.cat(base_parts, dim=0),
         confidence=torch.cat(confidence_parts, dim=0),
+        prior_score=torch.cat(prior_parts, dim=0),
+        stability_score=torch.cat(stability_parts, dim=0),
+        history_consistency_score=torch.cat(history_confidence_parts, dim=0),
     )
+    data.has_confidence_components = has_confidence_components
+    return data
 
 
 def _build_output_frame(
@@ -518,7 +566,15 @@ def run_gnn_pipeline(
 
     in_dim = train_data.x.shape[1]
     model = MultiScaleGraphSAGE(in_dim=in_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    confidence_logits: Optional[nn.Parameter] = None
+    optimizer_params = list(model.parameters())
+    if bool(getattr(train_data, "has_confidence_components", False)):
+        confidence_logits = nn.Parameter(
+            torch.log(torch.tensor(DEFAULT_CONFIDENCE_WEIGHTS, dtype=torch.float32)).to(device)
+        )
+        optimizer_params.append(confidence_logits)
+
+    optimizer = torch.optim.Adam(optimizer_params, lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=gnn_epochs)
     loss_func = nn.SmoothL1Loss(reduction="none")
 
@@ -529,7 +585,11 @@ def run_gnn_pipeline(
         optimizer.zero_grad()
         residual_pred, _ = model(train_data)
         loss_per_node = loss_func(residual_pred, train_data.y)
-        sample_weights = train_data.confidence.clamp(min=0.05)
+        if confidence_logits is not None:
+            current_weights = torch.softmax(confidence_logits, dim=0)
+            sample_weights = confidence_from_component_weights(train_data, current_weights)
+        else:
+            sample_weights = train_data.confidence.clamp(min=0.05)
         mean_weight = sample_weights.mean().clamp(min=1e-6)
         normalized_weights = sample_weights / mean_weight
         loss = (loss_per_node * normalized_weights).mean()
@@ -543,6 +603,16 @@ def run_gnn_pipeline(
                 f"Epoch {epoch}/{gnn_epochs}, Loss = {loss.item():.4f}, "
                 f"LR = {current_lr:.6f}"
             )
+
+    learned_confidence_weights = None
+    if confidence_logits is not None:
+        learned_confidence_weights = torch.softmax(confidence_logits.detach(), dim=0)
+        print(
+            "Learned confidence weights: "
+            f"prior={learned_confidence_weights[0].item():.3f}, "
+            f"stability={learned_confidence_weights[1].item():.3f}, "
+            f"history_consistency={learned_confidence_weights[2].item():.3f}"
+        )
 
     model.eval()
     with torch.no_grad():
@@ -558,6 +628,14 @@ def run_gnn_pipeline(
         refined_pred=refined_pred,
         final_output_csv=final_output_csv,
     )
+    if learned_confidence_weights is not None:
+        metrics.update(
+            {
+                "w_prior": float(learned_confidence_weights[0].item()),
+                "w_stability": float(learned_confidence_weights[1].item()),
+                "w_history_consistency": float(learned_confidence_weights[2].item()),
+            }
+        )
 
     methods = ["GRU", "GNN(Refined)"]
     mae_values = [metrics["mae_gru"], metrics["mae_refined"]]
