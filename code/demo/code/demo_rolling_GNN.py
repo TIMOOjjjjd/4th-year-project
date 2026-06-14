@@ -11,7 +11,7 @@ import torch
 from confidence_softmax import DEFAULT_CONFIDENCE_WEIGHTS, combine_confidence_components
 from gnn_model import run_gnn_pipeline
 
-MODEL_BACKEND = "multiscale"  # "lstm", "gru", "transformer", or "multiscale"
+MODEL_BACKEND = "tcn"  # "lstm", "gru", "transformer", "tcn", or "multiscale"
 
 if MODEL_BACKEND == "lstm":
     from persistent_lstm import ManagerConfig, PureLSTMModelManager as MultiScaleModelManager
@@ -19,6 +19,8 @@ elif MODEL_BACKEND == "gru":
     from persistent_gru import ManagerConfig, PureGRUModelManager as MultiScaleModelManager
 elif MODEL_BACKEND == "transformer":
     from persistent_transformer import ManagerConfig, PureTransformerModelManager as MultiScaleModelManager
+elif MODEL_BACKEND == "tcn":
+    from persistent_tcn import ManagerConfig, PureTCNModelManager as MultiScaleModelManager
 elif MODEL_BACKEND == "multiscale":
     from persistent_multiscale_incre_confi import ManagerConfig, MultiScaleModelManager
 else:
