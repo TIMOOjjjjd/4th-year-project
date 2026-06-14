@@ -29,7 +29,16 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_PATH = BASE_DIR / "data.parquet"
 DEFAULT_RESULTS_DIR = BASE_DIR / "ex_1_result"
 
-ALL_BACKENDS = ("lstm", "gru", "transformer", "multiscale", "sarima", "tcn")
+ALL_BACKENDS = (
+    "lstm",
+    "gru",
+    "transformer",
+    "multiscale",
+    "sarima",
+    "tcn",
+    "dlinear",
+    "patchtst",
+)
 EXCLUDED_ZONES = (103, 104, 105, 46, 264, 265)
 ROLLING_STEPS = 24
 
@@ -64,6 +73,8 @@ BACKEND_IMPORTS = {
     ),
     "sarima": ("persistent_sarima", "ManagerConfig", "SARIMAModelManager"),
     "tcn": ("persistent_tcn", "ManagerConfig", "PureTCNModelManager"),
+    "dlinear": ("persistent_dlinear", "ManagerConfig", "DLinearModelManager"),
+    "patchtst": ("persistent_patchtst", "ManagerConfig", "PatchTSTModelManager"),
 }
 
 
@@ -450,6 +461,8 @@ def main() -> None:
         "seed": args.seed,
         "reuse_checkpoints": args.reuse_checkpoints,
         "multiscale_backend": "persistent_multiscale_incre_confi",
+        "dlinear_backend": "persistent_dlinear",
+        "patchtst_backend": "persistent_patchtst",
     }
     write_json(results_dir / "run_config.json", run_config)
 
