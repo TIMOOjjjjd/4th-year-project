@@ -113,6 +113,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gnn-lr", type=float, default=0.01)
     parser.add_argument("--gnn-patience", type=int, default=40)
     parser.add_argument(
+        "--use-edge-weight",
+        action="store_true",
+        help=(
+            "Use nonzero CSV values as weighted GraphSAGE aggregation weights. "
+            "By default only the graph topology is compared."
+        ),
+    )
+    parser.add_argument(
         "--graph-types",
         nargs="*",
         choices=["no_graph", "od", "residual", "geo", "random"],
@@ -435,6 +443,7 @@ def build_zone_only_graph_context(zone_names: List[str], lookup_df: pd.DataFrame
     }
     return GraphContext(
         edge_index=torch.empty((2, 0), dtype=torch.long),
+        edge_weight=torch.empty((0,), dtype=torch.float32),
         zone_names=zone_names,
         zone_idx_map={zone_name: idx for idx, zone_name in enumerate(zone_names)},
         location_to_zone=location_to_zone,
@@ -878,6 +887,7 @@ def collect_no_graph_predictions(
     rows["experiment_3_mode"] = "none"
     rows["Model"] = spec.model_name
     rows["random_seed"] = np.nan
+    rows["edge_weight_used"] = False
     rows["residual_target"] = rows["true_value"] - rows["base_pred"]
     rows["residual_pred"] = 0.0
     rows["refined_pred"] = rows["base_pred"]
@@ -893,6 +903,7 @@ def collect_no_graph_predictions(
             "experiment_3_mode",
             "Model",
             "random_seed",
+            "edge_weight_used",
             "PULocationID",
             "split",
             "is_test",
@@ -929,6 +940,7 @@ def hourly_record_from_predictions(
         "experiment_3_mode": predictions["experiment_3_mode"].iloc[0],
         "Model": spec.model_name,
         "random_seed": spec.random_seed,
+        "edge_weight_used": False,
         "hourly_mae": metrics["MAE"],
         "hourly_rmse": metrics["RMSE"],
         "hourly_mse": metrics["MSE"],
@@ -950,8 +962,13 @@ def run_graph_variant(
     cfg: GNNTrainingConfig,
     seed: int,
     spec: GraphSpec,
+    use_edge_weight: bool,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
-    data = build_gnn_features(step_df=step_df, graph=graph)
+    data = build_gnn_features(
+        step_df=step_df,
+        graph=graph,
+        use_edge_weight=use_edge_weight,
+    )
     splits = masks_from_location_splits(data=data, split_sets=split_sets)
     prediction_df, hourly_record = run_single_ablation(
         target_hour=target_hour,
@@ -968,12 +985,14 @@ def run_graph_variant(
     prediction_df["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     prediction_df["Model"] = spec.model_name
     prediction_df["random_seed"] = spec.random_seed
+    prediction_df["edge_weight_used"] = bool(use_edge_weight)
 
     hourly_record["graph_type"] = graph_key
     hourly_record["mode"] = graph_key
     hourly_record["experiment_3_mode"] = GRAPH_CONFIDENCE_MODE
     hourly_record["Model"] = spec.model_name
     hourly_record["random_seed"] = spec.random_seed
+    hourly_record["edge_weight_used"] = bool(use_edge_weight)
     return prediction_df, hourly_record
 
 
@@ -1083,6 +1102,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
     print("Graph variants:", ", ".join(requested_graphs))
+    print("Use graph edge weights:", bool(args.use_edge_weight))
     if rolling_od:
         print(
             "Rolling OD graph window: "
@@ -1093,6 +1113,16 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             "Residual graph window: "
             f"{args.residual_window_hours} hours before each target hour"
         )
+    if rolling_od and residual_graph_enabled:
+        od_window_hours = int(args.od_lookback_days * 24)
+        if od_window_hours == int(args.residual_window_hours):
+            print(f"OD/residual graph history windows match: {od_window_hours} hours.")
+        else:
+            print(
+                "WARNING: OD/residual graph history windows differ: "
+                f"OD={od_window_hours} hours, "
+                f"residual={args.residual_window_hours} hours."
+            )
 
     df = load_taxi_data(
         data_path=args.data,
@@ -1232,6 +1262,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                     cfg=gnn_cfg,
                     seed=args.seed + step,
                     spec=spec,
+                    use_edge_weight=args.use_edge_weight,
                 )
 
             detailed_frames.append(prediction_df)

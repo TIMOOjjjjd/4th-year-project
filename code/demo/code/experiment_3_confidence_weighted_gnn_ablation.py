@@ -128,6 +128,7 @@ class GraphContext:
     """Static graph metadata shared by all rolling hours."""
 
     edge_index: torch.Tensor
+    edge_weight: torch.Tensor
     zone_names: List[str]
     zone_idx_map: Dict[str, int]
     location_to_zone: Dict[int, str]
@@ -247,7 +248,7 @@ def build_graph_context(edge_csv: Path, lookup_df: pd.DataFrame) -> GraphContext
     df_adj = df_adj.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
     adj_matrix = torch.tensor(df_adj.values, dtype=torch.float32)
-    edge_index, _ = dense_to_sparse(adj_matrix)
+    edge_index, edge_weight = dense_to_sparse(adj_matrix)
 
     zone_names = df_adj.index.tolist()
     zone_idx_map = {zone_name: idx for idx, zone_name in enumerate(zone_names)}
@@ -266,6 +267,7 @@ def build_graph_context(edge_csv: Path, lookup_df: pd.DataFrame) -> GraphContext
 
     return GraphContext(
         edge_index=edge_index,
+        edge_weight=edge_weight.float(),
         zone_names=zone_names,
         zone_idx_map=zone_idx_map,
         location_to_zone=location_to_zone,
@@ -505,7 +507,11 @@ def compute_confidence_components(
     return step_df
 
 
-def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
+def build_gnn_features(
+    step_df: pd.DataFrame,
+    graph: GraphContext,
+    use_edge_weight: bool = False,
+) -> Data:
     """Build mode-invariant node features and residual targets.
 
     For a fair confidence ablation, every mode uses exactly the same node
@@ -554,7 +560,11 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     if valid_indices.numel() < 3:
         raise ValueError("Not enough valid graph nodes to train/evaluate residual GNN.")
 
-    edge_index = remap_edges_to_valid_nodes(graph.edge_index, valid_indices)
+    edge_index, edge_weight = remap_edges_and_weights_to_valid_nodes(
+        edge_index=graph.edge_index,
+        valid_indices=valid_indices,
+        edge_weight=graph.edge_weight if use_edge_weight else None,
+    )
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
     history_tensor = history_tensor[valid_indices]
@@ -573,7 +583,7 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     )
     residual_target = node_label - node_pred
 
-    return Data(
+    data = Data(
         x=x_feat,
         edge_index=edge_index,
         y=residual_target,
@@ -585,25 +595,51 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
         history_consistency_score=history_consistency,
         full_confidence=full_confidence,
     )
+    if edge_weight is not None:
+        data.edge_weight = edge_weight
+    return data
+
+
+def remap_edges_and_weights_to_valid_nodes(
+    edge_index: torch.Tensor,
+    valid_indices: torch.Tensor,
+    edge_weight: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    valid_old = [int(idx) for idx in valid_indices.cpu().tolist()]
+    valid_set = set(valid_old)
+    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(valid_old)}
+
+    remapped_edges: List[Tuple[int, int]] = []
+    remapped_weights: List[float] = []
+    for edge_pos, (src, dst) in enumerate(edge_index.t().tolist()):
+        src_i, dst_i = int(src), int(dst)
+        if src_i in valid_set and dst_i in valid_set:
+            remapped_edges.append((old_to_new[src_i], old_to_new[dst_i]))
+            if edge_weight is not None:
+                remapped_weights.append(float(edge_weight[edge_pos].item()))
+
+    if not remapped_edges:
+        empty_edge_index = torch.empty((2, 0), dtype=torch.long)
+        empty_edge_weight = (
+            torch.empty((0,), dtype=torch.float32) if edge_weight is not None else None
+        )
+        return empty_edge_index, empty_edge_weight
+
+    remapped_edge_index = torch.tensor(remapped_edges, dtype=torch.long).t().contiguous()
+    if edge_weight is None:
+        return remapped_edge_index, None
+    return remapped_edge_index, torch.tensor(remapped_weights, dtype=torch.float32)
 
 
 def remap_edges_to_valid_nodes(
     edge_index: torch.Tensor,
     valid_indices: torch.Tensor,
 ) -> torch.Tensor:
-    valid_old = [int(idx) for idx in valid_indices.cpu().tolist()]
-    valid_set = set(valid_old)
-    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(valid_old)}
-
-    remapped_edges: List[Tuple[int, int]] = []
-    for src, dst in edge_index.t().tolist():
-        src_i, dst_i = int(src), int(dst)
-        if src_i in valid_set and dst_i in valid_set:
-            remapped_edges.append((old_to_new[src_i], old_to_new[dst_i]))
-
-    if not remapped_edges:
-        return torch.empty((2, 0), dtype=torch.long)
-    return torch.tensor(remapped_edges, dtype=torch.long).t().contiguous()
+    remapped_edge_index, _ = remap_edges_and_weights_to_valid_nodes(
+        edge_index=edge_index,
+        valid_indices=valid_indices,
+    )
+    return remapped_edge_index
 
 
 def get_sample_weights(mode: str, data: Data) -> torch.Tensor:

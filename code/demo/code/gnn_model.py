@@ -32,24 +32,66 @@ class MultiScaleGraphSAGE(nn.Module):
         super().__init__()
         self.sage1 = SAGEConv(in_dim, hidden_dim, aggr="mean")
         self.sage2 = SAGEConv(hidden_dim, hidden_dim, aggr="mean")
+        self.weighted_sage1 = WeightedMeanSAGEConv(in_dim, hidden_dim)
+        self.weighted_sage2 = WeightedMeanSAGEConv(hidden_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.out_linear = nn.Linear(hidden_dim, 1)
 
     def forward(self, data: Data) -> torch.Tensor:
         x, edge_index = data.x, data.edge_index
         base_pred = getattr(data, "base_pred", x[:, 0])
+        edge_weight = getattr(data, "edge_weight", None)
 
-        x = self.sage1(x, edge_index)
+        if edge_weight is None:
+            x = self.sage1(x, edge_index)
+        else:
+            x = self.weighted_sage1(x, edge_index, edge_weight)
         x = F.gelu(x)
         x = self.dropout(x)
 
-        x = self.sage2(x, edge_index)
+        if edge_weight is None:
+            x = self.sage2(x, edge_index)
+        else:
+            x = self.weighted_sage2(x, edge_index, edge_weight)
         x = F.gelu(x)
         x = self.dropout(x)
 
         residual = self.out_linear(x).squeeze(-1)
         refined = base_pred + residual
         return residual, refined
+
+
+class WeightedMeanSAGEConv(nn.Module):
+    """GraphSAGE-style weighted mean aggregation.
+
+    Signed weights are allowed. The denominator uses absolute weights so negative
+    residual-correlation edges do not cancel the neighborhood normalizer.
+    """
+
+    def __init__(self, in_dim: int, out_dim: int) -> None:
+        super().__init__()
+        self.lin_self = nn.Linear(in_dim, out_dim)
+        self.lin_neigh = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor,
+    ) -> torch.Tensor:
+        if edge_index.numel() == 0:
+            neigh = torch.zeros_like(x)
+        else:
+            src, dst = edge_index
+            weights = edge_weight.to(device=x.device, dtype=x.dtype).view(-1, 1)
+            neigh = x.new_zeros(x.shape)
+            neigh.index_add_(0, dst, x[src] * weights)
+
+            normalizer = x.new_zeros((x.shape[0], 1))
+            normalizer.index_add_(0, dst, weights.abs())
+            neigh = neigh / normalizer.clamp(min=1e-12)
+
+        return self.lin_self(x) + self.lin_neigh(neigh)
 
 
 def _prepare_predictions_frame(
