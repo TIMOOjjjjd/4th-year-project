@@ -18,6 +18,10 @@ The experiment reports MAE, RMSE, and mean absolute residual for each group,
 then computes Pearson and Spearman correlations between learned confidence and
 absolute error. A reliable confidence score should show lower errors in the
 higher-confidence groups and a negative confidence-vs-error correlation.
+
+The learned-softmax GNN is trained only on residual snapshots from hours
+strictly before each target hour. Target-hour labels are used only after
+inference to compute reliability metrics.
 """
 
 from __future__ import annotations
@@ -42,12 +46,16 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     GNNTrainingConfig,
     ManagerConfig,
     MultiScaleModelManager,
+    SplitMasks,
+    build_historical_gnn_training_data,
     build_gnn_features,
     build_zone_hourly_counts,
     clean_checkpoint_dir,
     compute_confidence_components,
+    filter_history_frames_before,
     load_required_data,
-    make_node_splits,
+    make_location_split_sets,
+    masks_from_location_splits,
     run_multiscale_temporal_baseline,
     run_single_ablation,
     select_zones,
@@ -366,6 +374,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
     )
 
     detailed_frames: List[pd.DataFrame] = []
+    historical_step_frames: List[pd.DataFrame] = []
     for step in range(args.rolling_steps):
         target_hour = args.start_target + pd.Timedelta(hours=step)
         print(f"\n///// Experiment 6 target hour: {target_hour} step {step} /////")
@@ -379,18 +388,44 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
         )
         history_df = df[df["datetime"] < target_hour]
         step_df = compute_confidence_components(step_df=baseline_df, history_df=history_df)
-        data = build_gnn_features(step_df=step_df, graph=graph)
-        splits = make_node_splits(
-            node_count=data.num_nodes,
+        inference_data = build_gnn_features(step_df=step_df, graph=graph)
+        split_sets = make_location_split_sets(
+            location_ids=inference_data.location_id.cpu().numpy().astype(int),
             seed=args.seed + step,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
         )
+        inference_splits = masks_from_location_splits(
+            data=inference_data,
+            split_sets=split_sets,
+            require_train_val=False,
+            require_test=True,
+        )
+        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+        train_data = build_historical_gnn_training_data(
+            history_frames=history_frames,
+            graph=graph,
+        )
+        train_splits: Optional[SplitMasks] = None
+        if train_data is not None:
+            try:
+                train_splits = masks_from_location_splits(
+                    data=train_data,
+                    split_sets=split_sets,
+                    require_train_val=True,
+                    require_test=False,
+                )
+            except ValueError as exc:
+                print(f"[{target_hour}] historical GNN training skipped: {exc}")
+                train_data = None
+
         prediction_df, hourly_record = run_single_ablation(
             target_hour=target_hour,
             mode=EXPERIMENT_MODE,
-            data=data,
-            splits=splits,
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
+            inference_splits=inference_splits,
             device=device,
             cfg=gnn_cfg,
             seed=args.seed + step,
@@ -404,6 +439,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             f"[{target_hour}] test_MAE={hourly_record['hourly_mae']:.4f} "
             f"mean_test_confidence={test_mean_confidence:.4f}"
         )
+        historical_step_frames.append(step_df.copy())
 
     return pd.concat(detailed_frames, ignore_index=True)
 

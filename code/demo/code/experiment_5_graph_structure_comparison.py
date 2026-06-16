@@ -12,7 +12,9 @@ pipeline. The only variable is the graph structure:
 All graph variants use Experiment 3's learned-softmax confidence-weighted
 residual loss.
 For fairness, each rolling hour shares the same temporal predictions and the
-same location-based train/validation/test split across all graph structures.
+same location-based split across all graph structures. The GNN train/validation
+loss is computed only on historical residual snapshots before the target hour;
+target-hour labels are used only for post-inference test metrics.
 """
 
 from __future__ import annotations
@@ -48,12 +50,14 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     ManagerConfig,
     MultiScaleModelManager,
     SplitMasks,
+    build_historical_gnn_training_data,
     build_gnn_features,
     build_graph_context,
     build_zone_hourly_counts,
     clean_checkpoint_dir,
     compute_confidence_components,
     evaluate_refined_predictions,
+    filter_history_frames_before,
     run_multiscale_temporal_baseline,
     run_single_ablation,
     set_random_seed,
@@ -846,13 +850,20 @@ def make_location_split_sets(
     )
 
 
-def masks_from_location_splits(data, split_sets: LocationSplitSets) -> SplitMasks:
+def masks_from_location_splits(
+    data,
+    split_sets: LocationSplitSets,
+    require_train_val: bool = True,
+    require_test: bool = False,
+) -> SplitMasks:
     location_ids = data.location_id.cpu().numpy().astype(int)
     train = torch.tensor([loc_id in split_sets.train for loc_id in location_ids])
     val = torch.tensor([loc_id in split_sets.val for loc_id in location_ids])
     test = torch.tensor([loc_id in split_sets.test for loc_id in location_ids])
-    if int(train.sum()) == 0 or int(val.sum()) == 0 or int(test.sum()) == 0:
-        raise ValueError("Graph data does not contain a non-empty train/val/test split.")
+    if require_train_val and (int(train.sum()) == 0 or int(val.sum()) == 0):
+        raise ValueError("Graph data does not contain non-empty train/val splits.")
+    if require_test and int(test.sum()) == 0:
+        raise ValueError("Graph data does not contain a non-empty test split.")
     return SplitMasks(train=train, val=val, test=test)
 
 
@@ -957,6 +968,7 @@ def run_graph_variant(
     graph_key: str,
     graph: GraphContext,
     step_df: pd.DataFrame,
+    history_frames: Sequence[pd.DataFrame],
     split_sets: LocationSplitSets,
     device: torch.device,
     cfg: GNNTrainingConfig,
@@ -964,17 +976,42 @@ def run_graph_variant(
     spec: GraphSpec,
     use_edge_weight: bool,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
-    data = build_gnn_features(
+    inference_data = build_gnn_features(
         step_df=step_df,
         graph=graph,
         use_edge_weight=use_edge_weight,
     )
-    splits = masks_from_location_splits(data=data, split_sets=split_sets)
+    inference_splits = masks_from_location_splits(
+        data=inference_data,
+        split_sets=split_sets,
+        require_train_val=False,
+        require_test=True,
+    )
+    train_data = build_historical_gnn_training_data(
+        history_frames=history_frames,
+        graph=graph,
+        use_edge_weight=use_edge_weight,
+    )
+    train_splits: Optional[SplitMasks] = None
+    if train_data is not None:
+        try:
+            train_splits = masks_from_location_splits(
+                data=train_data,
+                split_sets=split_sets,
+                require_train_val=True,
+                require_test=False,
+            )
+        except ValueError as exc:
+            print(f"[{target_hour}] {graph_key} historical GNN training skipped: {exc}")
+            train_data = None
+
     prediction_df, hourly_record = run_single_ablation(
         target_hour=target_hour,
         mode=GRAPH_CONFIDENCE_MODE,
-        data=data,
-        splits=splits,
+        train_data=train_data,
+        train_splits=train_splits,
+        inference_data=inference_data,
+        inference_splits=inference_splits,
         device=device,
         cfg=cfg,
         seed=seed,
@@ -1176,6 +1213,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     hourly_records: List[Dict[str, object]] = []
     residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
     residual_summary_records: List[Dict[str, object]] = []
+    historical_step_frames: List[pd.DataFrame] = []
 
     for step in range(args.rolling_steps):
         target_hour = args.start_target + pd.Timedelta(hours=step)
@@ -1235,6 +1273,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
         )
+        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
 
         hour_messages: List[str] = []
         for graph_key in requested_graphs:
@@ -1257,6 +1296,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                     graph_key=graph_key,
                     graph=graphs[graph_key],
                     step_df=step_df,
+                    history_frames=history_frames,
                     split_sets=split_sets,
                     device=device,
                     cfg=gnn_cfg,
@@ -1270,6 +1310,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             hour_messages.append(f"{graph_key} MAE={hourly_record['hourly_mae']:.4f}")
 
         print(f"[{target_hour}] " + ", ".join(hour_messages))
+        historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)
     hourly_df = pd.DataFrame(hourly_records)
