@@ -9,6 +9,10 @@ G2: Multi-scale + GraphSAGE residual correction + historical mean features
 
 G1/G2 use learned-softmax confidence weighting over prior, stability, and
 history-consistency components in the residual loss.
+
+For each rolling target hour, G1/G2 train only on residual snapshots from hours
+strictly before the target. Target-hour labels are used only for post-inference
+test metrics.
 """
 
 from __future__ import annotations
@@ -103,6 +107,15 @@ class SplitMasks:
     train: torch.Tensor
     val: torch.Tensor
     test: torch.Tensor
+
+
+@dataclass(frozen=True)
+class LocationSplitSets:
+    """Location-level split reused across historical training and target inference."""
+
+    train: set[int]
+    val: set[int]
+    test: set[int]
 
 
 @dataclass(frozen=True)
@@ -524,6 +537,101 @@ def build_gnn_data(
     return data
 
 
+def build_historical_gnn_training_data(
+    history_frames: Sequence[pd.DataFrame],
+    graph: GraphContext,
+    feature_columns: Sequence[str],
+) -> Optional[Data]:
+    """Concatenate historical residual snapshots into one train graph."""
+
+    snapshots: List[Data] = []
+    for frame in history_frames:
+        if frame.empty:
+            continue
+        try:
+            snapshots.append(
+                build_gnn_data(
+                    step_df=frame,
+                    graph=graph,
+                    feature_columns=feature_columns,
+                )
+            )
+        except ValueError:
+            continue
+
+    if not snapshots:
+        return None
+
+    x_parts: List[torch.Tensor] = []
+    y_parts: List[torch.Tensor] = []
+    base_parts: List[torch.Tensor] = []
+    true_parts: List[torch.Tensor] = []
+    confidence_parts: List[torch.Tensor] = []
+    prior_parts: List[torch.Tensor] = []
+    stability_parts: List[torch.Tensor] = []
+    history_score_parts: List[torch.Tensor] = []
+    edge_parts: List[torch.Tensor] = []
+    zone_names: List[str] = []
+    location_ids: List[int] = []
+
+    offset = 0
+    for snapshot in snapshots:
+        x_parts.append(snapshot.x)
+        y_parts.append(snapshot.y)
+        base_parts.append(snapshot.base_pred)
+        true_parts.append(snapshot.true_value)
+        confidence_parts.append(snapshot.confidence)
+        prior_parts.append(snapshot.prior_score)
+        stability_parts.append(snapshot.stability_score)
+        history_score_parts.append(snapshot.history_consistency_score)
+        zone_names.extend(str(name) for name in snapshot.zone_names)
+        location_ids.extend(int(loc_id) for loc_id in snapshot.location_ids)
+
+        if snapshot.edge_index.numel() > 0:
+            edge_parts.append(snapshot.edge_index + offset)
+        offset += int(snapshot.num_nodes)
+
+    edge_index = (
+        torch.cat(edge_parts, dim=1)
+        if edge_parts
+        else torch.empty((2, 0), dtype=torch.long)
+    )
+    data = Data(
+        x=torch.cat(x_parts, dim=0),
+        edge_index=edge_index,
+        y=torch.cat(y_parts, dim=0),
+        base_pred=torch.cat(base_parts, dim=0),
+        true_value=torch.cat(true_parts, dim=0),
+        confidence=torch.cat(confidence_parts, dim=0),
+        prior_score=torch.cat(prior_parts, dim=0),
+        stability_score=torch.cat(stability_parts, dim=0),
+        history_consistency_score=torch.cat(history_score_parts, dim=0),
+    )
+    data.zone_names = tuple(zone_names)
+    data.location_ids = tuple(location_ids)
+    return data
+
+
+def filter_history_frames_before(
+    history_frames: Sequence[pd.DataFrame],
+    target_hour: pd.Timestamp,
+) -> List[pd.DataFrame]:
+    """Return cached residual snapshots whose label hour is before target_hour."""
+
+    filtered: List[pd.DataFrame] = []
+    target_ts = pd.Timestamp(target_hour)
+    for frame in history_frames:
+        if frame.empty:
+            continue
+        if "target_hour" not in frame.columns:
+            filtered.append(frame)
+            continue
+        frame_hours = pd.to_datetime(frame["target_hour"])
+        if frame_hours.max() < target_ts:
+            filtered.append(frame)
+    return filtered
+
+
 def remap_edges_to_valid_nodes(
     edge_index: torch.Tensor,
     valid_indices: torch.Tensor,
@@ -582,9 +690,61 @@ def make_node_splits(
     return SplitMasks(train=train_mask, val=val_mask, test=test_mask)
 
 
-def train_residual_gnn(
+def make_location_split_sets(
+    location_ids: Sequence[int],
+    seed: int,
+    train_ratio: float,
+    val_ratio: float,
+) -> LocationSplitSets:
+    if train_ratio <= 0.0 or val_ratio < 0.0 or train_ratio + val_ratio >= 1.0:
+        raise ValueError("Require train_ratio > 0, val_ratio >= 0, and train + val < 1.")
+
+    unique_ids = np.array(sorted(set(int(loc_id) for loc_id in location_ids)), dtype=int)
+    if unique_ids.size < 3:
+        raise ValueError("At least three locations are required for train/val/test splits.")
+
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(unique_ids)
+    train_count = max(1, int(round(unique_ids.size * train_ratio)))
+    val_count = max(1, int(round(unique_ids.size * val_ratio)))
+    if train_count + val_count >= unique_ids.size:
+        val_count = max(1, unique_ids.size - train_count - 1)
+    test_count = unique_ids.size - train_count - val_count
+    if test_count <= 0:
+        train_count = max(1, unique_ids.size - val_count - 1)
+        test_count = unique_ids.size - train_count - val_count
+    if test_count <= 0:
+        raise ValueError("Unable to create a non-empty test split.")
+
+    return LocationSplitSets(
+        train=set(int(loc_id) for loc_id in perm[:train_count]),
+        val=set(int(loc_id) for loc_id in perm[train_count : train_count + val_count]),
+        test=set(int(loc_id) for loc_id in perm[train_count + val_count :]),
+    )
+
+
+def masks_from_location_splits(
     data: Data,
-    splits: SplitMasks,
+    split_sets: LocationSplitSets,
+    require_train_val: bool = True,
+    require_test: bool = False,
+) -> SplitMasks:
+    location_ids = [int(loc_id) for loc_id in data.location_ids]
+    train = torch.tensor([loc_id in split_sets.train for loc_id in location_ids])
+    val = torch.tensor([loc_id in split_sets.val for loc_id in location_ids])
+    test = torch.tensor([loc_id in split_sets.test for loc_id in location_ids])
+
+    if require_train_val and (int(train.sum()) == 0 or int(val.sum()) == 0):
+        raise ValueError("Graph data does not contain non-empty train/val splits.")
+    if require_test and int(test.sum()) == 0:
+        raise ValueError("Graph data does not contain a non-empty test split.")
+    return SplitMasks(train=train, val=val, test=test)
+
+
+def train_residual_gnn(
+    train_data: Optional[Data],
+    train_splits: Optional[SplitMasks],
+    inference_data: Data,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
@@ -596,18 +756,36 @@ def train_residual_gnn(
     """
 
     set_random_seed(seed)
+
+    if (
+        train_data is None
+        or train_splits is None
+        or int(train_splits.train.sum()) == 0
+        or int(train_splits.val.sum()) == 0
+    ):
+        base_pred = inference_data.base_pred.detach().cpu().numpy()
+        return GNNResult(
+            residual_pred=np.zeros_like(base_pred, dtype=np.float32),
+            refined_pred=base_pred.astype(np.float32),
+            best_epoch=0,
+            best_val_loss=float("nan"),
+            confidence_weights=np.array(DEFAULT_CONFIDENCE_WEIGHTS, dtype=np.float32),
+        )
+
     model = MultiScaleGraphSAGE(
-        in_dim=int(data.x.shape[1]),
+        in_dim=int(train_data.x.shape[1]),
         hidden_dim=cfg.hidden_dim,
         dropout=cfg.dropout,
     ).to(device)
 
-    data = data.to(device)
-    train_mask = splits.train.to(device)
-    val_mask = splits.val.to(device)
+    train_data_device = train_data.to(device)
+    train_mask = train_splits.train.to(device)
+    val_mask = train_splits.val.to(device)
 
     logits = nn.Parameter(
-        torch.log(torch.tensor(DEFAULT_CONFIDENCE_WEIGHTS, dtype=torch.float32)).to(device)
+        torch.log(
+            torch.tensor(DEFAULT_CONFIDENCE_WEIGHTS, dtype=torch.float32)
+        ).to(device)
     )
     optimizer = torch.optim.Adam(
         list(model.parameters()) + [logits],
@@ -625,11 +803,17 @@ def train_residual_gnn(
     for epoch in range(1, cfg.epochs + 1):
         model.train()
         optimizer.zero_grad()
-        residual_pred, _ = model(data)
+        residual_pred, _ = model(train_data_device)
 
-        loss_per_node = loss_func(residual_pred[train_mask], data.y[train_mask])
+        loss_per_node = loss_func(
+            residual_pred[train_mask],
+            train_data_device.y[train_mask],
+        )
         confidence_weights = torch.softmax(logits, dim=0)
-        sample_weights = confidence_from_component_weights(data, confidence_weights)[train_mask]
+        sample_weights = confidence_from_component_weights(
+            train_data_device,
+            confidence_weights,
+        )[train_mask]
         sample_weights = sample_weights / sample_weights.mean().clamp(min=1e-6)
         loss = (loss_per_node * sample_weights).mean()
 
@@ -639,8 +823,11 @@ def train_residual_gnn(
 
         model.eval()
         with torch.no_grad():
-            val_residual_pred, _ = model(data)
-            val_loss = loss_func(val_residual_pred[val_mask], data.y[val_mask]).mean()
+            val_residual_pred, _ = model(train_data_device)
+            val_loss = loss_func(
+                val_residual_pred[val_mask],
+                train_data_device.y[val_mask],
+            ).mean()
             val_loss_value = float(val_loss.item())
 
         if val_loss_value < best_val_loss:
@@ -662,8 +849,9 @@ def train_residual_gnn(
     learned_weights = torch.softmax(logits.detach(), dim=0).cpu().numpy()
 
     model.eval()
+    inference_data_device = inference_data.to(device)
     with torch.no_grad():
-        residual_pred, refined_pred = model(data)
+        residual_pred, refined_pred = model(inference_data_device)
 
     return GNNResult(
         residual_pred=residual_pred.detach().cpu().numpy(),
@@ -694,6 +882,7 @@ def metrics_record(
     metrics: Dict[str, float],
     splits: SplitMasks,
     node_count: int,
+    train_splits: Optional[SplitMasks] = None,
     best_epoch: Optional[int] = None,
     best_val_loss: Optional[float] = None,
     confidence_weights: Optional[np.ndarray] = None,
@@ -712,8 +901,12 @@ def metrics_record(
         "RMSE": metrics["RMSE"],
         "MSE": metrics["MSE"],
         "n_nodes": node_count,
-        "n_train": int(splits.train.sum().item()),
-        "n_val": int(splits.val.sum().item()),
+        "n_train": int(
+            (train_splits.train if train_splits is not None else splits.train).sum().item()
+        ),
+        "n_val": int(
+            (train_splits.val if train_splits is not None else splits.val).sum().item()
+        ),
         "n_test": int(splits.test.sum().item()),
         "best_epoch": best_epoch,
         "best_val_loss": best_val_loss,
@@ -913,6 +1106,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_records: List[Dict[str, object]] = []
     error_store: Dict[str, List[np.ndarray]] = {"T4": [], "G1": [], "G2": []}
+    historical_step_frames: List[pd.DataFrame] = []
 
     for step in range(args.rolling_steps):
         target_hour = args.start_target + pd.Timedelta(hours=step)
@@ -933,12 +1127,54 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         data_g2 = build_gnn_features_g2(step_df, graph)
         validate_matching_nodes(data_g1, data_g2)
 
-        splits = make_node_splits(
-            node_count=data_g1.num_nodes,
+        split_sets = make_location_split_sets(
+            location_ids=[int(loc_id) for loc_id in data_g1.location_ids],
             seed=args.seed + step,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
         )
+        splits = masks_from_location_splits(
+            data=data_g1,
+            split_sets=split_sets,
+            require_train_val=False,
+            require_test=True,
+        )
+        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+        train_data_g1 = build_historical_gnn_training_data(
+            history_frames=history_frames,
+            graph=graph,
+            feature_columns=["base_pred", "confidence"],
+        )
+        train_data_g2 = build_historical_gnn_training_data(
+            history_frames=history_frames,
+            graph=graph,
+            feature_columns=["base_pred", "confidence", *HISTORY_FEATURES],
+        )
+        train_splits_g1: Optional[SplitMasks] = None
+        train_splits_g2: Optional[SplitMasks] = None
+        if train_data_g1 is not None:
+            try:
+                train_splits_g1 = masks_from_location_splits(
+                    data=train_data_g1,
+                    split_sets=split_sets,
+                    require_train_val=True,
+                    require_test=False,
+                )
+            except ValueError as exc:
+                print(f"[{target_hour}] G1 historical GNN training skipped: {exc}")
+                train_data_g1 = None
+        if train_data_g2 is not None:
+            try:
+                train_splits_g2 = masks_from_location_splits(
+                    data=train_data_g2,
+                    split_sets=split_sets,
+                    require_train_val=True,
+                    require_test=False,
+                )
+            except ValueError as exc:
+                print(f"[{target_hour}] G2 historical GNN training skipped: {exc}")
+                train_data_g2 = None
+
         test_mask_np = splits.test.cpu().numpy().astype(bool)
         y_true = data_g1.true_value.cpu().numpy()[test_mask_np]
         base_pred = data_g1.base_pred.cpu().numpy()[test_mask_np]
@@ -956,8 +1192,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         )
 
         result_g1 = train_residual_gnn(
-            data=data_g1,
-            splits=splits,
+            train_data=train_data_g1,
+            train_splits=train_splits_g1,
+            inference_data=data_g1,
             device=device,
             cfg=gnn_cfg,
             seed=args.seed + step * 10 + 1,
@@ -972,6 +1209,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 metrics=metrics_g1,
                 splits=splits,
                 node_count=data_g1.num_nodes,
+                train_splits=train_splits_g1,
                 best_epoch=result_g1.best_epoch,
                 best_val_loss=result_g1.best_val_loss,
                 confidence_weights=result_g1.confidence_weights,
@@ -979,8 +1217,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         )
 
         result_g2 = train_residual_gnn(
-            data=data_g2,
-            splits=splits,
+            train_data=train_data_g2,
+            train_splits=train_splits_g2,
+            inference_data=data_g2,
             device=device,
             cfg=gnn_cfg,
             seed=args.seed + step * 10 + 2,
@@ -995,6 +1234,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 metrics=metrics_g2,
                 splits=splits,
                 node_count=data_g2.num_nodes,
+                train_splits=train_splits_g2,
                 best_epoch=result_g2.best_epoch,
                 best_val_loss=result_g2.best_val_loss,
                 confidence_weights=result_g2.confidence_weights,
@@ -1010,6 +1250,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             f"G2 MAE={metrics_g2['MAE']:.4f} "
             f"(w={g2_weights[0]:.3f}/{g2_weights[1]:.3f}/{g2_weights[2]:.3f})"
         )
+        historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.DataFrame(detailed_records)
     summary_df = summarize_results(error_store)

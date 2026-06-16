@@ -17,6 +17,10 @@ The compared confidence weight modes are:
 
 The confidence score is used as a normalized residual-loss sample weight. It is
 not used as a training label.
+
+All GNN training and confidence-weight validation use residual snapshots from
+hours strictly before each rolling target hour. Target-hour labels are used only
+after inference for test metrics.
 """
 
 from __future__ import annotations
@@ -51,8 +55,10 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     compute_prior_scores,
     compute_stability_scores,
     evaluate_refined_predictions,
+    filter_history_frames_before,
     load_required_data,
-    make_node_splits,
+    make_location_split_sets,
+    masks_from_location_splits,
     remap_edges_to_valid_nodes,
     run_multiscale_temporal_baseline,
     select_zones,
@@ -284,6 +290,70 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     )
 
 
+def build_historical_gnn_training_data(
+    history_frames: Sequence[pd.DataFrame],
+    graph: GraphContext,
+) -> Optional[Data]:
+    """Concatenate historical residual snapshots into one train graph."""
+
+    snapshots: List[Data] = []
+    for frame in history_frames:
+        if frame.empty:
+            continue
+        try:
+            snapshots.append(build_gnn_features(step_df=frame, graph=graph))
+        except ValueError:
+            continue
+
+    if not snapshots:
+        return None
+
+    x_parts: List[torch.Tensor] = []
+    y_parts: List[torch.Tensor] = []
+    base_parts: List[torch.Tensor] = []
+    true_parts: List[torch.Tensor] = []
+    location_parts: List[torch.Tensor] = []
+    prior_parts: List[torch.Tensor] = []
+    stability_parts: List[torch.Tensor] = []
+    history_parts: List[torch.Tensor] = []
+    confidence_parts: List[torch.Tensor] = []
+    edge_parts: List[torch.Tensor] = []
+
+    offset = 0
+    for snapshot in snapshots:
+        x_parts.append(snapshot.x)
+        y_parts.append(snapshot.y)
+        base_parts.append(snapshot.base_pred)
+        true_parts.append(snapshot.true_value)
+        location_parts.append(snapshot.location_id)
+        prior_parts.append(snapshot.prior_score)
+        stability_parts.append(snapshot.stability_score)
+        history_parts.append(snapshot.history_consistency_score)
+        confidence_parts.append(snapshot.full_confidence)
+
+        if snapshot.edge_index.numel() > 0:
+            edge_parts.append(snapshot.edge_index + offset)
+        offset += int(snapshot.num_nodes)
+
+    edge_index = (
+        torch.cat(edge_parts, dim=1)
+        if edge_parts
+        else torch.empty((2, 0), dtype=torch.long)
+    )
+    return Data(
+        x=torch.cat(x_parts, dim=0),
+        edge_index=edge_index,
+        y=torch.cat(y_parts, dim=0),
+        base_pred=torch.cat(base_parts, dim=0),
+        true_value=torch.cat(true_parts, dim=0),
+        location_id=torch.cat(location_parts, dim=0),
+        prior_score=torch.cat(prior_parts, dim=0),
+        stability_score=torch.cat(stability_parts, dim=0),
+        history_consistency_score=torch.cat(history_parts, dim=0),
+        full_confidence=torch.cat(confidence_parts, dim=0),
+    )
+
+
 def component_tensor(data: Data) -> torch.Tensor:
     return torch.stack(
         [
@@ -304,24 +374,25 @@ def confidence_from_weights(data: Data, weights: torch.Tensor) -> torch.Tensor:
 
 
 def train_residual_gnn_with_sample_weight(
-    data: Data,
-    splits: SplitMasks,
-    sample_weight: torch.Tensor,
+    train_data: Data,
+    train_splits: SplitMasks,
+    train_sample_weight: torch.Tensor,
+    inference_data: Data,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
-) -> GNNResult:
+) -> Tuple[GNNResult, GNNResult]:
     set_random_seed(seed)
     model = MultiScaleGraphSAGE(
-        in_dim=int(data.x.shape[1]),
+        in_dim=int(train_data.x.shape[1]),
         hidden_dim=cfg.hidden_dim,
         dropout=cfg.dropout,
     ).to(device)
 
-    data_device = copy.deepcopy(data).to(device)
-    sample_weight = sample_weight.to(device).float().clamp(min=0.05, max=1.0)
-    train_mask = splits.train.to(device)
-    val_mask = splits.val.to(device)
+    train_data_device = copy.deepcopy(train_data).to(device)
+    sample_weight = train_sample_weight.to(device).float().clamp(min=0.05, max=1.0)
+    train_mask = train_splits.train.to(device)
+    val_mask = train_splits.val.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
@@ -335,9 +406,12 @@ def train_residual_gnn_with_sample_weight(
     for epoch in range(1, cfg.epochs + 1):
         model.train()
         optimizer.zero_grad()
-        residual_pred, _ = model(data_device)
+        residual_pred, _ = model(train_data_device)
 
-        loss_per_node = loss_func(residual_pred[train_mask], data_device.y[train_mask])
+        loss_per_node = loss_func(
+            residual_pred[train_mask],
+            train_data_device.y[train_mask],
+        )
         train_weight = sample_weight[train_mask]
         train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
         loss = (loss_per_node * train_weight).mean()
@@ -347,8 +421,11 @@ def train_residual_gnn_with_sample_weight(
 
         model.eval()
         with torch.no_grad():
-            val_residual_pred, _ = model(data_device)
-            val_loss = loss_func(val_residual_pred[val_mask], data_device.y[val_mask]).mean()
+            val_residual_pred, _ = model(train_data_device)
+            val_loss = loss_func(
+                val_residual_pred[val_mask],
+                train_data_device.y[val_mask],
+            ).mean()
             val_loss_value = float(val_loss.item())
 
         if val_loss_value < best_val_loss:
@@ -365,36 +442,49 @@ def train_residual_gnn_with_sample_weight(
         model.load_state_dict(best_state)
 
     model.eval()
+    inference_data_device = copy.deepcopy(inference_data).to(device)
     with torch.no_grad():
-        residual_pred, refined_pred = model(data_device)
+        train_residual_pred, train_refined_pred = model(train_data_device)
+        residual_pred, refined_pred = model(inference_data_device)
 
-    return GNNResult(
-        residual_pred=residual_pred.detach().cpu().numpy(),
-        refined_pred=refined_pred.detach().cpu().numpy(),
-        best_epoch=best_epoch,
-        best_val_loss=best_val_loss,
+    return (
+        GNNResult(
+            residual_pred=residual_pred.detach().cpu().numpy(),
+            refined_pred=refined_pred.detach().cpu().numpy(),
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+        ),
+        GNNResult(
+            residual_pred=train_residual_pred.detach().cpu().numpy(),
+            refined_pred=train_refined_pred.detach().cpu().numpy(),
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+        ),
     )
 
 
 def train_residual_gnn_with_learned_weights(
-    data: Data,
-    splits: SplitMasks,
+    train_data: Data,
+    train_splits: SplitMasks,
+    inference_data: Data,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
     entropy_weight: float,
-) -> Tuple[GNNResult, np.ndarray]:
+) -> Tuple[GNNResult, GNNResult, np.ndarray]:
     set_random_seed(seed)
     model = MultiScaleGraphSAGE(
-        in_dim=int(data.x.shape[1]),
+        in_dim=int(train_data.x.shape[1]),
         hidden_dim=cfg.hidden_dim,
         dropout=cfg.dropout,
     ).to(device)
-    logits = nn.Parameter(torch.log(torch.tensor(FIXED_WEIGHTS, dtype=torch.float32)).to(device))
+    logits = nn.Parameter(
+        torch.log(torch.tensor(FIXED_WEIGHTS, dtype=torch.float32)).to(device)
+    )
 
-    data_device = copy.deepcopy(data).to(device)
-    train_mask = splits.train.to(device)
-    val_mask = splits.val.to(device)
+    train_data_device = copy.deepcopy(train_data).to(device)
+    train_mask = train_splits.train.to(device)
+    val_mask = train_splits.val.to(device)
     optimizer = torch.optim.Adam(
         list(model.parameters()) + [logits],
         lr=cfg.learning_rate,
@@ -413,9 +503,12 @@ def train_residual_gnn_with_learned_weights(
         optimizer.zero_grad()
 
         weights = torch.softmax(logits, dim=0)
-        sample_weight = confidence_from_weights(data_device, weights)
-        residual_pred, _ = model(data_device)
-        loss_per_node = loss_func(residual_pred[train_mask], data_device.y[train_mask])
+        sample_weight = confidence_from_weights(train_data_device, weights)
+        residual_pred, _ = model(train_data_device)
+        loss_per_node = loss_func(
+            residual_pred[train_mask],
+            train_data_device.y[train_mask],
+        )
         train_weight = sample_weight[train_mask]
         train_weight = train_weight / train_weight.mean().clamp(min=1e-6)
         loss = (loss_per_node * train_weight).mean()
@@ -429,8 +522,11 @@ def train_residual_gnn_with_learned_weights(
 
         model.eval()
         with torch.no_grad():
-            val_residual_pred, _ = model(data_device)
-            val_loss = loss_func(val_residual_pred[val_mask], data_device.y[val_mask]).mean()
+            val_residual_pred, _ = model(train_data_device)
+            val_loss = loss_func(
+                val_residual_pred[val_mask],
+                train_data_device.y[val_mask],
+            ).mean()
             val_loss_value = float(val_loss.item())
 
         if val_loss_value < best_val_loss:
@@ -451,13 +547,21 @@ def train_residual_gnn_with_learned_weights(
 
     learned_weights = torch.softmax(logits.detach(), dim=0)
     model.eval()
+    inference_data_device = copy.deepcopy(inference_data).to(device)
     with torch.no_grad():
-        residual_pred, refined_pred = model(data_device)
+        train_residual_pred, train_refined_pred = model(train_data_device)
+        residual_pred, refined_pred = model(inference_data_device)
 
     return (
         GNNResult(
             residual_pred=residual_pred.detach().cpu().numpy(),
             refined_pred=refined_pred.detach().cpu().numpy(),
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+        ),
+        GNNResult(
+            residual_pred=train_residual_pred.detach().cpu().numpy(),
+            refined_pred=train_refined_pred.detach().cpu().numpy(),
             best_epoch=best_epoch,
             best_val_loss=best_val_loss,
         ),
@@ -550,32 +654,36 @@ def collect_predictions(
 
 
 def train_candidate(
-    data: Data,
-    splits: SplitMasks,
+    train_data: Data,
+    train_splits: SplitMasks,
+    inference_data: Data,
     weights: np.ndarray,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
 ) -> Tuple[GNNResult, torch.Tensor, Dict[str, float]]:
     weight_tensor = torch.tensor(weights, dtype=torch.float32)
-    sample_weight = confidence_from_weights(data, weight_tensor)
-    result = train_residual_gnn_with_sample_weight(
-        data=data,
-        splits=splits,
-        sample_weight=sample_weight,
+    train_sample_weight = confidence_from_weights(train_data, weight_tensor)
+    result, train_result = train_residual_gnn_with_sample_weight(
+        train_data=train_data,
+        train_splits=train_splits,
+        train_sample_weight=train_sample_weight,
+        inference_data=inference_data,
         device=device,
         cfg=cfg,
         seed=seed,
     )
-    val_metrics = evaluate_split(data=data, result=result, mask=splits.val)
-    return result, sample_weight, val_metrics
+    val_metrics = evaluate_split(data=train_data, result=train_result, mask=train_splits.val)
+    inference_sample_weight = confidence_from_weights(inference_data, weight_tensor)
+    return result, inference_sample_weight, val_metrics
 
 
 def run_weight_search_mode(
     mode: str,
     candidates: Sequence[np.ndarray],
-    data: Data,
-    splits: SplitMasks,
+    train_data: Data,
+    train_splits: SplitMasks,
+    inference_data: Data,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
@@ -588,8 +696,9 @@ def run_weight_search_mode(
 
     for candidate_idx, weights in enumerate(candidates):
         result, sample_weight, val_metrics = train_candidate(
-            data=data,
-            splits=splits,
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
             weights=weights,
             device=device,
             cfg=cfg,
@@ -617,8 +726,10 @@ def run_weight_search_mode(
 def run_single_mode(
     target_hour: pd.Timestamp,
     mode: str,
-    data: Data,
-    splits: SplitMasks,
+    train_data: Optional[Data],
+    train_splits: Optional[SplitMasks],
+    inference_data: Data,
+    inference_splits: SplitMasks,
     device: torch.device,
     cfg: GNNTrainingConfig,
     seed: int,
@@ -626,10 +737,27 @@ def run_single_mode(
     random_candidates: int,
     learned_entropy: float,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
-    if mode == "fixed":
+    if train_data is None or train_splits is None:
+        selected_weights = FIXED_WEIGHTS
+        result = GNNResult(
+            residual_pred=np.zeros_like(
+                inference_data.base_pred.detach().cpu().numpy(),
+                dtype=np.float32,
+            ),
+            refined_pred=inference_data.base_pred.detach().cpu().numpy().astype(np.float32),
+            best_epoch=0,
+            best_val_loss=float("nan"),
+        )
+        sample_weight = confidence_from_weights(
+            inference_data,
+            torch.tensor(selected_weights, dtype=torch.float32),
+        )
+        val_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "MSE": float("nan")}
+    elif mode == "fixed":
         result, sample_weight, val_metrics = train_candidate(
-            data=data,
-            splits=splits,
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
             weights=FIXED_WEIGHTS,
             device=device,
             cfg=cfg,
@@ -641,8 +769,9 @@ def run_single_mode(
         result, sample_weight, selected_weights, val_metrics = run_weight_search_mode(
             mode=mode,
             candidates=candidates,
-            data=data,
-            splits=splits,
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
             device=device,
             cfg=cfg,
             seed=seed,
@@ -652,35 +781,41 @@ def run_single_mode(
         result, sample_weight, selected_weights, val_metrics = run_weight_search_mode(
             mode=mode,
             candidates=candidates,
-            data=data,
-            splits=splits,
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
             device=device,
             cfg=cfg,
             seed=seed,
         )
     elif mode == "learned_softmax":
-        result, selected_weights = train_residual_gnn_with_learned_weights(
-            data=data,
-            splits=splits,
+        result, train_result, selected_weights = train_residual_gnn_with_learned_weights(
+            train_data=train_data,
+            train_splits=train_splits,
+            inference_data=inference_data,
             device=device,
             cfg=cfg,
             seed=seed,
             entropy_weight=learned_entropy,
         )
         sample_weight = confidence_from_weights(
-            data,
+            inference_data,
             torch.tensor(selected_weights, dtype=torch.float32),
         )
-        val_metrics = evaluate_split(data=data, result=result, mask=splits.val)
+        val_metrics = evaluate_split(data=train_data, result=train_result, mask=train_splits.val)
     else:
         raise ValueError(f"Unsupported mode: {mode}")
 
-    test_metrics = evaluate_split(data=data, result=result, mask=splits.test)
+    test_metrics = evaluate_split(
+        data=inference_data,
+        result=result,
+        mask=inference_splits.test,
+    )
     prediction_df = collect_predictions(
         target_hour=target_hour,
         mode=mode,
-        data=data,
-        splits=splits,
+        data=inference_data,
+        splits=inference_splits,
         result=result,
         sample_weight=sample_weight,
         weights=selected_weights,
@@ -699,9 +834,9 @@ def run_single_mode(
         "w_prior": float(selected_weights[0]),
         "w_stability": float(selected_weights[1]),
         "w_history_consistency": float(selected_weights[2]),
-        "n_train": int(splits.train.sum().item()),
-        "n_val": int(splits.val.sum().item()),
-        "n_test": int(splits.test.sum().item()),
+        "n_train": int(train_splits.train.sum().item()) if train_splits is not None else 0,
+        "n_val": int(train_splits.val.sum().item()) if train_splits is not None else 0,
+        "n_test": int(inference_splits.test.sum().item()),
         "best_epoch": result.best_epoch,
         "best_val_loss": result.best_val_loss,
     }
@@ -792,6 +927,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_frames: List[pd.DataFrame] = []
     hourly_records: List[Dict[str, object]] = []
+    historical_step_frames: List[pd.DataFrame] = []
 
     for step in range(args.rolling_steps):
         target_hour = args.start_target + pd.Timedelta(hours=step)
@@ -809,21 +945,46 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             step_df=baseline_df,
             history_df=history_df,
         )
-        data = build_gnn_features(step_df=step_df, graph=graph)
-        splits = make_node_splits(
-            node_count=data.num_nodes,
+        inference_data = build_gnn_features(step_df=step_df, graph=graph)
+        split_sets = make_location_split_sets(
+            location_ids=inference_data.location_id.cpu().numpy().astype(int),
             seed=args.seed + step,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
         )
+        inference_splits = masks_from_location_splits(
+            data=inference_data,
+            split_sets=split_sets,
+            require_train_val=False,
+            require_test=True,
+        )
+        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+        train_data = build_historical_gnn_training_data(
+            history_frames=history_frames,
+            graph=graph,
+        )
+        train_splits: Optional[SplitMasks] = None
+        if train_data is not None:
+            try:
+                train_splits = masks_from_location_splits(
+                    data=train_data,
+                    split_sets=split_sets,
+                    require_train_val=True,
+                    require_test=False,
+                )
+            except ValueError as exc:
+                print(f"[{target_hour}] historical GNN training skipped: {exc}")
+                train_data = None
 
         hour_messages: List[str] = []
         for mode in args.modes:
             prediction_df, hourly_record = run_single_mode(
                 target_hour=target_hour,
                 mode=mode,
-                data=data,
-                splits=splits,
+                train_data=train_data,
+                train_splits=train_splits,
+                inference_data=inference_data,
+                inference_splits=inference_splits,
                 device=device,
                 cfg=gnn_cfg,
                 seed=args.seed + step * 100 + MODE_ORDER.index(mode),
@@ -847,6 +1008,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             )
 
         print(f"[{target_hour}] " + ", ".join(hour_messages))
+        historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)
     hourly_df = pd.DataFrame(hourly_records)
