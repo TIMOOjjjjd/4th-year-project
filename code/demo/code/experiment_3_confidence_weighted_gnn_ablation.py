@@ -530,16 +530,16 @@ def build_gnn_features(
     For a fair confidence ablation, every mode uses exactly the same node
     features:
 
-        base_pred, mean_24h, mean_168h, mean_720h
+        base_pred, full_confidence
 
-    Confidence is deliberately not included in x. It only enters the weighted
-    residual loss through sample_weight.
+    full_confidence already includes the history-consistency component computed
+    from mean_24h/mean_168h/mean_720h, so the raw historical means are not
+    duplicated in x.
     """
 
     node_count = len(graph.zone_names)
     node_pred = torch.full((node_count,), float("nan"), dtype=torch.float32)
     node_label = torch.full((node_count,), float("nan"), dtype=torch.float32)
-    history_tensor = torch.full((node_count, len(HISTORY_FEATURES)), 0.0)
     prior = torch.full((node_count,), 0.4, dtype=torch.float32)
     stability = torch.full((node_count,), 0.5, dtype=torch.float32)
     history_consistency = torch.full((node_count,), 0.6, dtype=torch.float32)
@@ -565,9 +565,6 @@ def build_gnn_features(
             default=0.6,
         )
         full_confidence[node_idx] = clamp_score(float(row.full_confidence), default=0.5)
-        for idx, feature_name in enumerate(HISTORY_FEATURES):
-            value = getattr(row, feature_name, 0.0)
-            history_tensor[node_idx, idx] = 0.0 if pd.isna(value) else float(value)
 
     valid_indices = torch.where(~torch.isnan(node_pred) & ~torch.isnan(node_label))[0]
     if valid_indices.numel() < 3:
@@ -580,7 +577,6 @@ def build_gnn_features(
     )
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
-    history_tensor = history_tensor[valid_indices]
     prior = prior[valid_indices]
     stability = stability[valid_indices]
     history_consistency = history_consistency[valid_indices]
@@ -590,7 +586,7 @@ def build_gnn_features(
     x_feat = torch.cat(
         [
             node_pred.unsqueeze(1),
-            torch.log1p(history_tensor),
+            full_confidence.unsqueeze(1),
         ],
         dim=1,
     )
