@@ -66,7 +66,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 
 GRAPH_CONFIDENCE_MODE = "learned_softmax"
 DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
-DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_with_flow.csv"
+DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_5_multiscale"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
 DEFAULT_OD_LOOKBACK_DAYS = 30

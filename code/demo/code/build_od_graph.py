@@ -381,7 +381,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--template",
         type=Path,
-        default=BASE_DIR / "edge_weight_matrix_with_flow.csv",
+        default=BASE_DIR / "edge_weight_matrix_geo.csv",
         help="For OD graphs, use this existing matrix to preserve row/column zone order.",
     )
     parser.add_argument(
