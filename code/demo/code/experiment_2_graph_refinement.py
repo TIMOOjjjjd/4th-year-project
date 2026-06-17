@@ -1,16 +1,18 @@
 """Experiment 2: effect of GraphSAGE residual graph refinement.
 
 This script keeps the temporal baseline from persistent_multiscale_confi.py and
-adds two residual GNN variants on top:
+compares residual GNN feature variants on top:
 
 T4: Multi-scale temporal only
-G1: Multi-scale + GraphSAGE residual correction
-G2: Multi-scale + GraphSAGE residual correction + historical mean features
+G0: Multi-scale + GraphSAGE residual correction with base prediction only
+G1: Multi-scale + GraphSAGE residual correction with confidence feature
+G2: Multi-scale + GraphSAGE residual correction with historical mean features
+G3: Multi-scale + GraphSAGE residual correction with confidence + history
 
-G1/G2 use learned-softmax confidence weighting over prior, stability, and
+All GNN variants use learned-softmax confidence weighting over prior, stability, and
 history-consistency components in the residual loss.
 
-For each rolling target hour, G1/G2 train only on residual snapshots from hours
+For each rolling target hour, GNN variants train only on residual snapshots from hours
 strictly before the target. Target-hour labels are used only for post-inference
 test metrics.
 """
@@ -78,14 +80,30 @@ MODEL_SPECS = {
         "model": "Multi-scale Temporal",
         "description": "Only base prediction",
     },
+    "G0": {
+        "model": "Multi-scale + GNN (Base Feature)",
+        "description": "GNN uses base prediction only as node feature",
+    },
     "G1": {
-        "model": "Multi-scale + GNN",
-        "description": "GNN learns residual correction",
+        "model": "Multi-scale + GNN + Confidence Feature",
+        "description": "GNN uses base prediction + confidence as node features",
     },
     "G2": {
         "model": "Multi-scale + GNN + History Features",
         "description": "GNN uses base prediction + historical mean features",
     },
+    "G3": {
+        "model": "Multi-scale + GNN + Confidence + History",
+        "description": "GNN uses base prediction + confidence + historical mean features",
+    },
+}
+MODEL_ORDER = ("T4", "G0", "G1", "G2", "G3")
+GNN_MODEL_ORDER = ("G0", "G1", "G2", "G3")
+FEATURE_COLUMNS_BY_MODEL = {
+    "G0": ["base_pred"],
+    "G1": ["base_pred", "confidence"],
+    "G2": ["base_pred", *HISTORY_FEATURES],
+    "G3": ["base_pred", "confidence", *HISTORY_FEATURES],
 }
 
 
@@ -433,6 +451,10 @@ def run_multiscale_temporal_baseline(
     return step_df
 
 
+def build_gnn_features_g0(step_df: pd.DataFrame, graph: GraphContext) -> Data:
+    return build_gnn_data(step_df, graph, feature_columns=["base_pred"])
+
+
 def build_gnn_features_g1(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     return build_gnn_data(step_df, graph, feature_columns=["base_pred", "confidence"])
 
@@ -441,8 +463,28 @@ def build_gnn_features_g2(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     return build_gnn_data(
         step_df,
         graph,
+        feature_columns=["base_pred", *HISTORY_FEATURES],
+    )
+
+
+def build_gnn_features_g3(step_df: pd.DataFrame, graph: GraphContext) -> Data:
+    return build_gnn_data(
+        step_df,
+        graph,
         feature_columns=["base_pred", "confidence", *HISTORY_FEATURES],
     )
+
+
+def build_gnn_features_for_model(
+    model_id: str,
+    step_df: pd.DataFrame,
+    graph: GraphContext,
+) -> Data:
+    try:
+        feature_columns = FEATURE_COLUMNS_BY_MODEL[model_id]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported GNN model id: {model_id}") from exc
+    return build_gnn_data(step_df=step_df, graph=graph, feature_columns=feature_columns)
 
 
 def build_gnn_data(
@@ -933,7 +975,7 @@ def summarize_results(error_store: Dict[str, List[np.ndarray]]) -> pd.DataFrame:
     temporal_mse = np.nan
 
     metric_by_model: Dict[str, Dict[str, float]] = {}
-    for model_id in ("T4", "G1", "G2"):
+    for model_id in MODEL_ORDER:
         errors = np.concatenate(error_store[model_id]) if error_store[model_id] else np.array([])
         if errors.size == 0:
             metrics = {"MAE": float("nan"), "RMSE": float("nan"), "MSE": float("nan")}
@@ -950,7 +992,7 @@ def summarize_results(error_store: Dict[str, List[np.ndarray]]) -> pd.DataFrame:
     temporal_rmse = metric_by_model["T4"]["RMSE"]
     temporal_mse = metric_by_model["T4"]["MSE"]
 
-    for model_id in ("T4", "G1", "G2"):
+    for model_id in MODEL_ORDER:
         metrics = metric_by_model[model_id]
         if model_id == "T4" or not np.isfinite(temporal_mae) or temporal_mae == 0.0:
             improvement = "-"
@@ -1070,9 +1112,11 @@ def select_zones(df: pd.DataFrame, max_zones: Optional[int]) -> List[int]:
     return zones
 
 
-def validate_matching_nodes(data_a: Data, data_b: Data) -> None:
-    if list(data_a.location_ids) != list(data_b.location_ids):
-        raise ValueError("G1 and G2 graph snapshots do not have matching node order.")
+def validate_matching_nodes(reference: Data, candidates: Dict[str, Data]) -> None:
+    reference_ids = list(reference.location_ids)
+    for model_id, data in candidates.items():
+        if list(data.location_ids) != reference_ids:
+            raise ValueError(f"{model_id} graph snapshot does not match node order.")
 
 
 def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -1105,7 +1149,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     )
 
     detailed_records: List[Dict[str, object]] = []
-    error_store: Dict[str, List[np.ndarray]] = {"T4": [], "G1": [], "G2": []}
+    error_store: Dict[str, List[np.ndarray]] = {model_id: [] for model_id in MODEL_ORDER}
     historical_step_frames: List[pd.DataFrame] = []
 
     for step in range(args.rolling_steps):
@@ -1123,61 +1167,52 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             prior_scores=prior_scores,
         )
 
-        data_g1 = build_gnn_features_g1(step_df, graph)
-        data_g2 = build_gnn_features_g2(step_df, graph)
-        validate_matching_nodes(data_g1, data_g2)
+        inference_data_by_model = {
+            model_id: build_gnn_features_for_model(model_id, step_df, graph)
+            for model_id in GNN_MODEL_ORDER
+        }
+        reference_data = inference_data_by_model[GNN_MODEL_ORDER[0]]
+        validate_matching_nodes(reference_data, inference_data_by_model)
 
         split_sets = make_location_split_sets(
-            location_ids=[int(loc_id) for loc_id in data_g1.location_ids],
+            location_ids=[int(loc_id) for loc_id in reference_data.location_ids],
             seed=args.seed + step,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
         )
         splits = masks_from_location_splits(
-            data=data_g1,
+            data=reference_data,
             split_sets=split_sets,
             require_train_val=False,
             require_test=True,
         )
         history_frames = filter_history_frames_before(historical_step_frames, target_hour)
-        train_data_g1 = build_historical_gnn_training_data(
-            history_frames=history_frames,
-            graph=graph,
-            feature_columns=["base_pred", "confidence"],
-        )
-        train_data_g2 = build_historical_gnn_training_data(
-            history_frames=history_frames,
-            graph=graph,
-            feature_columns=["base_pred", "confidence", *HISTORY_FEATURES],
-        )
-        train_splits_g1: Optional[SplitMasks] = None
-        train_splits_g2: Optional[SplitMasks] = None
-        if train_data_g1 is not None:
-            try:
-                train_splits_g1 = masks_from_location_splits(
-                    data=train_data_g1,
-                    split_sets=split_sets,
-                    require_train_val=True,
-                    require_test=False,
-                )
-            except ValueError as exc:
-                print(f"[{target_hour}] G1 historical GNN training skipped: {exc}")
-                train_data_g1 = None
-        if train_data_g2 is not None:
-            try:
-                train_splits_g2 = masks_from_location_splits(
-                    data=train_data_g2,
-                    split_sets=split_sets,
-                    require_train_val=True,
-                    require_test=False,
-                )
-            except ValueError as exc:
-                print(f"[{target_hour}] G2 historical GNN training skipped: {exc}")
-                train_data_g2 = None
+        train_data_by_model: Dict[str, Optional[Data]] = {}
+        train_splits_by_model: Dict[str, Optional[SplitMasks]] = {}
+        for model_id in GNN_MODEL_ORDER:
+            train_data = build_historical_gnn_training_data(
+                history_frames=history_frames,
+                graph=graph,
+                feature_columns=FEATURE_COLUMNS_BY_MODEL[model_id],
+            )
+            train_splits: Optional[SplitMasks] = None
+            if train_data is not None:
+                try:
+                    train_splits = masks_from_location_splits(
+                        data=train_data,
+                        split_sets=split_sets,
+                        require_train_val=True,
+                        require_test=False,
+                    )
+                except ValueError as exc:
+                    print(f"[{target_hour}] {model_id} historical GNN training skipped: {exc}")
+                    train_data = None
+            train_data_by_model[model_id] = train_data
+            train_splits_by_model[model_id] = train_splits
 
         test_mask_np = splits.test.cpu().numpy().astype(bool)
-        y_true = data_g1.true_value.cpu().numpy()[test_mask_np]
-        base_pred = data_g1.base_pred.cpu().numpy()[test_mask_np]
+        y_true = reference_data.true_value.cpu().numpy()[test_mask_np]
+        base_pred = reference_data.base_pred.cpu().numpy()[test_mask_np]
 
         metrics_t4 = evaluate_predictions(y_true=y_true, y_pred=base_pred)
         collect_errors(error_store, "T4", y_true, base_pred)
@@ -1187,69 +1222,44 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 model_id="T4",
                 metrics=metrics_t4,
                 splits=splits,
-                node_count=data_g1.num_nodes,
+                node_count=reference_data.num_nodes,
             )
         )
 
-        result_g1 = train_residual_gnn(
-            train_data=train_data_g1,
-            train_splits=train_splits_g1,
-            inference_data=data_g1,
-            device=device,
-            cfg=gnn_cfg,
-            seed=args.seed + step * 10 + 1,
-        )
-        refined_g1 = result_g1.refined_pred[test_mask_np]
-        metrics_g1 = evaluate_predictions(y_true=y_true, y_pred=refined_g1)
-        collect_errors(error_store, "G1", y_true, refined_g1)
-        detailed_records.append(
-            metrics_record(
-                target_hour=target_hour,
-                model_id="G1",
-                metrics=metrics_g1,
-                splits=splits,
-                node_count=data_g1.num_nodes,
-                train_splits=train_splits_g1,
-                best_epoch=result_g1.best_epoch,
-                best_val_loss=result_g1.best_val_loss,
-                confidence_weights=result_g1.confidence_weights,
+        hour_messages = [f"T4 MAE={metrics_t4['MAE']:.4f}"]
+        for model_offset, model_id in enumerate(GNN_MODEL_ORDER, start=1):
+            result = train_residual_gnn(
+                train_data=train_data_by_model[model_id],
+                train_splits=train_splits_by_model[model_id],
+                inference_data=inference_data_by_model[model_id],
+                device=device,
+                cfg=gnn_cfg,
+                seed=args.seed + step * 10 + model_offset,
             )
-        )
-
-        result_g2 = train_residual_gnn(
-            train_data=train_data_g2,
-            train_splits=train_splits_g2,
-            inference_data=data_g2,
-            device=device,
-            cfg=gnn_cfg,
-            seed=args.seed + step * 10 + 2,
-        )
-        refined_g2 = result_g2.refined_pred[test_mask_np]
-        metrics_g2 = evaluate_predictions(y_true=y_true, y_pred=refined_g2)
-        collect_errors(error_store, "G2", y_true, refined_g2)
-        detailed_records.append(
-            metrics_record(
-                target_hour=target_hour,
-                model_id="G2",
-                metrics=metrics_g2,
-                splits=splits,
-                node_count=data_g2.num_nodes,
-                train_splits=train_splits_g2,
-                best_epoch=result_g2.best_epoch,
-                best_val_loss=result_g2.best_val_loss,
-                confidence_weights=result_g2.confidence_weights,
+            refined = result.refined_pred[test_mask_np]
+            metrics = evaluate_predictions(y_true=y_true, y_pred=refined)
+            collect_errors(error_store, model_id, y_true, refined)
+            detailed_records.append(
+                metrics_record(
+                    target_hour=target_hour,
+                    model_id=model_id,
+                    metrics=metrics,
+                    splits=splits,
+                    node_count=inference_data_by_model[model_id].num_nodes,
+                    train_splits=train_splits_by_model[model_id],
+                    best_epoch=result.best_epoch,
+                    best_val_loss=result.best_val_loss,
+                    confidence_weights=result.confidence_weights,
+                )
             )
-        )
 
-        g1_weights = result_g1.confidence_weights
-        g2_weights = result_g2.confidence_weights
-        print(
-            f"[{target_hour}] T4 MAE={metrics_t4['MAE']:.4f}, "
-            f"G1 MAE={metrics_g1['MAE']:.4f} "
-            f"(w={g1_weights[0]:.3f}/{g1_weights[1]:.3f}/{g1_weights[2]:.3f}), "
-            f"G2 MAE={metrics_g2['MAE']:.4f} "
-            f"(w={g2_weights[0]:.3f}/{g2_weights[1]:.3f}/{g2_weights[2]:.3f})"
-        )
+            weights = result.confidence_weights
+            hour_messages.append(
+                f"{model_id} MAE={metrics['MAE']:.4f} "
+                f"(w={weights[0]:.3f}/{weights[1]:.3f}/{weights[2]:.3f})"
+            )
+
+        print(f"[{target_hour}] " + ", ".join(hour_messages))
         historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.DataFrame(detailed_records)
