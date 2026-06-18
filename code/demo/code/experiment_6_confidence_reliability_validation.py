@@ -63,7 +63,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 )
 
 
-DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_6_multiscale"
+DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_6_tcn"
 EXPERIMENT_MODE = "learned_softmax"
 OUTPUT_STEM = "experiment_6_confidence_reliability_validation"
 CONFIDENCE_GROUP_ORDER = [
@@ -379,6 +379,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
         target_hour = args.start_target + pd.Timedelta(hours=step)
         print(f"\n///// Experiment 6 target hour: {target_hour} step {step} /////")
 
+        set_random_seed(args.seed + step)
         baseline_df = run_multiscale_temporal_baseline(
             df=df,
             manager=manager,

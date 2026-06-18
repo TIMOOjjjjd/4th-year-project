@@ -210,6 +210,15 @@ class PureTCNModelManager:
         with open(self._meta_path(zone_id), "w", encoding="utf-8") as file_handle:
             json.dump(meta, file_handle)
 
+    def _load_meta(self, zone_id: int) -> Optional[pd.Timestamp]:
+        path = self._meta_path(zone_id)
+        if not path.exists():
+            return None
+        with open(path, "r", encoding="utf-8") as file_handle:
+            meta = json.load(file_handle)
+        timestamp = meta.get("last_trained_context_end") or meta.get("last_trained_until")
+        return pd.Timestamp(timestamp) if timestamp else None
+
     @staticmethod
     def _ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
         if "datetime" in df.columns:

@@ -53,7 +53,7 @@ from confidence_softmax import (
     confidence_from_component_weights,
 )
 from gnn_model import MultiScaleGraphSAGE
-from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
+from persistent_tcn import ManagerConfig, MultiScaleModelManager
 
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -68,7 +68,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_PATH = BASE_DIR / "data.parquet"
 DEFAULT_LOOKUP_PATH = BASE_DIR / "taxi-zone-lookup.csv"
 DEFAULT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
-DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_3_multiscale"
+DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_3_tcn"
 DEFAULT_RESULTS_DIR = BASE_DIR / "results"
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
@@ -348,7 +348,7 @@ def run_multiscale_temporal_baseline(
     zones: Sequence[int],
     zone_hourly_counts: pd.Series,
 ) -> pd.DataFrame:
-    """Generate leakage-free base_pred from persistent_multiscale_confi.py."""
+    """Generate leakage-free base_pred from persistent_tcn.py."""
 
     y_true_dict = get_true_counts(df, target_hour)
     records: List[Dict[str, object]] = []
@@ -485,7 +485,7 @@ def compute_confidence_components(
 ) -> pd.DataFrame:
     """Attach confidence components needed by the ablation.
 
-    persistent_multiscale_confi.py in this repo exposes MC uncertainty but does
+    persistent_tcn.py in this repo exposes MC uncertainty but does
     not expose _assign_confidence_scores(). Importing demo_rolling_GNN.py would
     execute top-level checkpoint cleanup, so this wrapper mirrors the component
     definitions locally and returns each component separately for ablation.
@@ -875,11 +875,11 @@ def train_residual_gnn_with_weighted_loss(
     cfg: GNNTrainingConfig,
     seed: int,
 ) -> GNNResult:
-    """Train GraphSAGE with confidence-weighted residual MSE.
+    """Train GraphSAGE with confidence-weighted residual SmoothL1 loss.
 
     Only historical residual labels on train nodes contribute to optimization:
 
-        loss_per_sample = (residual_pred - residual_target) ** 2
+        loss_per_sample = smooth_l1(residual_pred, residual_target)
         weighted_loss = mean(sample_weight * loss_per_sample)
 
     The target-hour graph is passed separately as inference_data and is never
@@ -935,6 +935,7 @@ def train_residual_gnn_with_weighted_loss(
 
     optimizer = torch.optim.Adam(optimizer_params, lr=cfg.learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
+    loss_func = nn.SmoothL1Loss(reduction="none")
 
     best_state: Optional[Dict[str, torch.Tensor]] = None
     best_logits: Optional[torch.Tensor] = None
@@ -947,9 +948,10 @@ def train_residual_gnn_with_weighted_loss(
         optimizer.zero_grad()
         residual_pred, _ = model(train_data_device)
 
-        loss_per_node = (
-            residual_pred[train_mask] - train_data_device.y[train_mask]
-        ) ** 2
+        loss_per_node = loss_func(
+            residual_pred[train_mask],
+            train_data_device.y[train_mask],
+        )
         if logits is not None:
             current_weights = torch.softmax(logits, dim=0)
             sample_weight = confidence_from_component_weights(
@@ -966,8 +968,9 @@ def train_residual_gnn_with_weighted_loss(
         model.eval()
         with torch.no_grad():
             val_residual_pred, _ = model(train_data_device)
-            val_loss = (
-                (val_residual_pred[val_mask] - train_data_device.y[val_mask]) ** 2
+            val_loss = loss_func(
+                val_residual_pred[val_mask],
+                train_data_device.y[val_mask],
             ).mean()
             val_loss_value = float(val_loss.item())
 
@@ -1222,6 +1225,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         target_hour = args.start_target + pd.Timedelta(hours=step)
         print(f"\n///// Experiment 3 target hour: {target_hour} step {step} /////")
 
+        set_random_seed(args.seed + step)
         baseline_df = run_multiscale_temporal_baseline(
             df=df,
             manager=manager,

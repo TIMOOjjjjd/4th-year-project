@@ -67,7 +67,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 GRAPH_CONFIDENCE_MODE = "learned_softmax"
 DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
-DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_5_multiscale"
+DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_5_tcn"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
 DEFAULT_OD_LOOKBACK_DAYS = 30
 DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
@@ -1218,6 +1218,8 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     for step in range(args.rolling_steps):
         target_hour = args.start_target + pd.Timedelta(hours=step)
         print(f"\n///// Experiment 5 target hour: {target_hour} step {step} /////")
+
+        set_random_seed(args.seed + step)
         if rolling_od:
             if target_hour not in rolling_od_cache:
                 rolling_od_cache[target_hour] = build_rolling_od_graph_context(

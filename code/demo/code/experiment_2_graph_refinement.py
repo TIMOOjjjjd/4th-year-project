@@ -1,13 +1,13 @@
 """Experiment 2: effect of GraphSAGE residual graph refinement.
 
-This script keeps the temporal baseline from persistent_multiscale_confi.py and
+This script keeps the temporal baseline from persistent_tcn.py and
 compares residual GNN feature variants on top:
 
-T4: Multi-scale temporal only
-G0: Multi-scale + GraphSAGE residual correction with base prediction only
-G1: Multi-scale + GraphSAGE residual correction with confidence feature
-G2: Multi-scale + GraphSAGE residual correction with historical mean features
-G3: Multi-scale + GraphSAGE residual correction with confidence + history
+T4: TCN temporal only
+G0: TCN + GraphSAGE residual correction with base prediction only
+G1: TCN + GraphSAGE residual correction with confidence feature
+G2: TCN + GraphSAGE residual correction with historical mean features
+G3: TCN + GraphSAGE residual correction with confidence + history
 
 All GNN variants use learned-softmax confidence weighting over prior, stability, and
 history-consistency components in the residual loss.
@@ -45,7 +45,7 @@ from confidence_softmax import (
     confidence_from_component_weights,
 )
 from gnn_model import MultiScaleGraphSAGE
-from persistent_multiscale_confi import ManagerConfig, MultiScaleModelManager
+from persistent_tcn import ManagerConfig, MultiScaleModelManager
 
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -60,7 +60,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_PATH = BASE_DIR / "data.parquet"
 DEFAULT_LOOKUP_PATH = BASE_DIR / "taxi-zone-lookup.csv"
 DEFAULT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
-DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_2_multiscale"
+DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_2_tcn"
 DEFAULT_RESULTS_DIR = BASE_DIR / "results"
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
@@ -77,23 +77,23 @@ HISTORY_CONSISTENCY_TAU = 1.0
 
 MODEL_SPECS = {
     "T4": {
-        "model": "Multi-scale Temporal",
+        "model": "TCN Temporal",
         "description": "Only base prediction",
     },
     "G0": {
-        "model": "Multi-scale + GNN (Base Feature)",
+        "model": "TCN + GNN (Base Feature)",
         "description": "GNN uses base prediction only as node feature",
     },
     "G1": {
-        "model": "Multi-scale + GNN + Confidence Feature",
+        "model": "TCN + GNN + Confidence Feature",
         "description": "GNN uses base prediction + confidence as node features",
     },
     "G2": {
-        "model": "Multi-scale + GNN + History Features",
+        "model": "TCN + GNN + History Features",
         "description": "GNN uses base prediction + historical mean features",
     },
     "G3": {
-        "model": "Multi-scale + GNN + Confidence + History",
+        "model": "TCN + GNN + Confidence + History",
         "description": "GNN uses base prediction + confidence + historical mean features",
     },
 }
@@ -405,7 +405,7 @@ def run_multiscale_temporal_baseline(
     zone_hourly_counts: pd.Series,
     prior_scores: Dict[int, float],
 ) -> pd.DataFrame:
-    """Generate base_pred using persistent_multiscale_confi.py only."""
+    """Generate base_pred using persistent_tcn.py only."""
 
     y_true_dict = get_true_counts(df, target_hour)
     records: List[Dict[str, object]] = []
@@ -1156,6 +1156,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         target_hour = args.start_target + pd.Timedelta(hours=step)
         print(f"\n///// Experiment 2 target hour: {target_hour} step {step} /////")
 
+        set_random_seed(args.seed + step)
         history_df = df[df["datetime"] < target_hour]
         prior_scores = compute_prior_scores(history_df)
         step_df = run_multiscale_temporal_baseline(
@@ -1227,14 +1228,14 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         )
 
         hour_messages = [f"T4 MAE={metrics_t4['MAE']:.4f}"]
-        for model_offset, model_id in enumerate(GNN_MODEL_ORDER, start=1):
+        for model_id in GNN_MODEL_ORDER:
             result = train_residual_gnn(
                 train_data=train_data_by_model[model_id],
                 train_splits=train_splits_by_model[model_id],
                 inference_data=inference_data_by_model[model_id],
                 device=device,
                 cfg=gnn_cfg,
-                seed=args.seed + step * 10 + model_offset,
+                seed=args.seed + step,
             )
             refined = result.refined_pred[test_mask_np]
             metrics = evaluate_predictions(y_true=y_true, y_pred=refined)
