@@ -73,6 +73,20 @@ DEFAULT_RESULTS_DIR = BASE_DIR / "results"
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
 ROLLING_STEPS = 24
+DEFAULT_WINDOW_STARTS = (
+    "2021-03-01 00:00",
+    "2021-03-29 00:00",
+    "2021-04-26 00:00",
+    "2021-05-24 00:00",
+    "2021-06-21 00:00",
+    "2021-07-05 00:00",
+    "2021-07-19 00:00",
+    "2021-08-16 00:00",
+    "2021-09-13 00:00",
+    "2021-10-11 00:00",
+    "2021-11-08 00:00",
+    "2021-12-06 00:00",
+)
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
 
 HISTORY_WINDOWS = {
@@ -189,6 +203,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
+    parser.add_argument(
+        "--window-starts",
+        nargs="*",
+        default=None,
+        help=(
+            "Optional explicit 24-hour window starts. By default, uses the "
+            "same twelve windows as demo_test.py. If omitted with a custom "
+            "--start-target, a single window is run for backward compatibility."
+        ),
+    )
     parser.add_argument("--rolling-steps", type=int, default=ROLLING_STEPS)
     parser.add_argument("--excluded-zones", type=int, nargs="*", default=EXCLUDED_ZONES)
     parser.add_argument("--mc-samples", type=int, default=10)
@@ -217,6 +241,40 @@ def parse_args() -> argparse.Namespace:
         help="Skip writing experiment_3_confidence_weighted_gnn_ablation_metrics.png.",
     )
     return parser.parse_args()
+
+
+def normalize_window_starts(values: Optional[Sequence[str]]) -> List[pd.Timestamp]:
+    raw_values = list(values) if values else list(DEFAULT_WINDOW_STARTS)
+    starts = sorted({pd.Timestamp(value).floor("h") for value in raw_values})
+    if not starts:
+        raise ValueError("At least one window start is required.")
+    return starts
+
+
+def resolve_window_starts(args: argparse.Namespace) -> List[pd.Timestamp]:
+    if args.window_starts is not None:
+        return normalize_window_starts(args.window_starts)
+    if pd.Timestamp(args.start_target) != START_TARGET:
+        return [pd.Timestamp(args.start_target).floor("h")]
+    return normalize_window_starts(None)
+
+
+def validate_windows(
+    df: pd.DataFrame,
+    window_starts: Sequence[pd.Timestamp],
+    rolling_steps: int,
+) -> None:
+    if rolling_steps <= 0:
+        raise ValueError("--rolling-steps must be positive.")
+
+    min_ts = df["datetime"].min()
+    max_ts = df["datetime"].max()
+    for start in window_starts:
+        end = start + pd.Timedelta(hours=rolling_steps - 1)
+        if start < min_ts or end > max_ts:
+            raise ValueError(
+                f"Window {start} to {end} is outside data range {min_ts} to {max_ts}."
+            )
 
 
 def set_random_seed(seed: int) -> None:
@@ -1202,6 +1260,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         edge_csv=args.edge_csv,
         excluded_zones=args.excluded_zones,
     )
+    window_starts = resolve_window_starts(args)
+    validate_windows(df, window_starts, args.rolling_steps)
+    print(
+        "Window starts:",
+        ", ".join(str(start) for start in window_starts),
+    )
     zones = select_zones(df, graph, args.max_zones)
     print("Graph-compatible zones selected:", len(zones))
 
@@ -1221,74 +1285,96 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     hourly_records: List[Dict[str, object]] = []
     historical_step_frames: List[pd.DataFrame] = []
 
-    for step in range(args.rolling_steps):
-        target_hour = args.start_target + pd.Timedelta(hours=step)
-        print(f"\n///// Experiment 3 target hour: {target_hour} step {step} /////")
-
-        set_random_seed(args.seed + step)
-        baseline_df = run_multiscale_temporal_baseline(
-            df=df,
-            manager=manager,
-            target_hour=target_hour,
-            zones=zones,
-            zone_hourly_counts=zone_hourly_counts,
+    for window_idx, window_start in enumerate(window_starts, start=1):
+        print(
+            f"\n===== Experiment 3 window {window_idx}/{len(window_starts)} "
+            f"start={window_start} ====="
         )
-        history_df = df[df["datetime"] < target_hour]
-        step_df = compute_confidence_components(
-            step_df=baseline_df,
-            history_df=history_df,
-        )
-        inference_data = build_gnn_features(step_df=step_df, graph=graph)
-        split_sets = make_location_split_sets(
-            location_ids=inference_data.location_id.cpu().numpy().astype(int),
-            seed=args.seed + step,
-            train_ratio=args.train_ratio,
-            val_ratio=args.val_ratio,
-        )
-        inference_splits = masks_from_location_splits(
-            data=inference_data,
-            split_sets=split_sets,
-            require_train_val=False,
-            require_test=True,
-        )
-
-        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
-        train_data = build_historical_gnn_training_data(
-            history_frames=history_frames,
-            graph=graph,
-        )
-        train_splits: Optional[SplitMasks] = None
-        if train_data is not None:
-            try:
-                train_splits = masks_from_location_splits(
-                    data=train_data,
-                    split_sets=split_sets,
-                    require_train_val=True,
-                    require_test=False,
-                )
-            except ValueError as exc:
-                print(f"[{target_hour}] historical GNN training skipped: {exc}")
-                train_data = None
-
-        hour_messages: List[str] = []
-        for mode in MODE_ORDER:
-            prediction_df, hourly_record = run_single_ablation(
-                target_hour=target_hour,
-                mode=mode,
-                train_data=train_data,
-                train_splits=train_splits,
-                inference_data=inference_data,
-                inference_splits=inference_splits,
-                device=device,
-                cfg=gnn_cfg,
-                seed=args.seed + step,
+        for step in range(args.rolling_steps):
+            global_step = (window_idx - 1) * args.rolling_steps + step
+            target_hour = window_start + pd.Timedelta(hours=step)
+            print(
+                f"\n///// Experiment 3 target hour: {target_hour} "
+                f"window {window_idx} step {step} /////"
             )
-            detailed_frames.append(prediction_df)
-            hourly_records.append(hourly_record)
-            hour_messages.append(f"{mode} MAE={hourly_record['hourly_mae']:.4f}")
 
-        print(f"[{target_hour}] " + ", ".join(hour_messages))
-        historical_step_frames.append(step_df.copy())
+            set_random_seed(args.seed + global_step)
+            baseline_df = run_multiscale_temporal_baseline(
+                df=df,
+                manager=manager,
+                target_hour=target_hour,
+                zones=zones,
+                zone_hourly_counts=zone_hourly_counts,
+            )
+            history_df = df[df["datetime"] < target_hour]
+            step_df = compute_confidence_components(
+                step_df=baseline_df,
+                history_df=history_df,
+            )
+            step_df["window_id"] = window_idx
+            step_df["window_start"] = window_start
+            step_df["window_step"] = step
+            inference_data = build_gnn_features(step_df=step_df, graph=graph)
+            split_sets = make_location_split_sets(
+                location_ids=inference_data.location_id.cpu().numpy().astype(int),
+                seed=args.seed + global_step,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+            )
+            inference_splits = masks_from_location_splits(
+                data=inference_data,
+                split_sets=split_sets,
+                require_train_val=False,
+                require_test=True,
+            )
+
+            history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+            train_data = build_historical_gnn_training_data(
+                history_frames=history_frames,
+                graph=graph,
+            )
+            train_splits: Optional[SplitMasks] = None
+            if train_data is not None:
+                try:
+                    train_splits = masks_from_location_splits(
+                        data=train_data,
+                        split_sets=split_sets,
+                        require_train_val=True,
+                        require_test=False,
+                    )
+                except ValueError as exc:
+                    print(f"[{target_hour}] historical GNN training skipped: {exc}")
+                    train_data = None
+
+            hour_messages: List[str] = []
+            for mode in MODE_ORDER:
+                prediction_df, hourly_record = run_single_ablation(
+                    target_hour=target_hour,
+                    mode=mode,
+                    train_data=train_data,
+                    train_splits=train_splits,
+                    inference_data=inference_data,
+                    inference_splits=inference_splits,
+                    device=device,
+                    cfg=gnn_cfg,
+                    seed=args.seed + global_step,
+                )
+                prediction_df["window_id"] = window_idx
+                prediction_df["window_start"] = window_start
+                prediction_df["window_step"] = step
+                hourly_record.update(
+                    {
+                        "window_id": window_idx,
+                        "window_start": window_start,
+                        "window_step": step,
+                    }
+                )
+                detailed_frames.append(prediction_df)
+                hourly_records.append(hourly_record)
+                hour_messages.append(f"{mode} MAE={hourly_record['hourly_mae']:.4f}")
+
+            print(f"[{target_hour}] " + ", ".join(hour_messages))
+            historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)
     hourly_mae_df = pd.DataFrame(hourly_records)
