@@ -58,9 +58,11 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     compute_confidence_components,
     evaluate_refined_predictions,
     filter_history_frames_before,
+    resolve_window_starts,
     run_multiscale_temporal_baseline,
     run_single_ablation,
     set_random_seed,
+    validate_windows,
 )
 
 
@@ -105,6 +107,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
+    parser.add_argument(
+        "--window-starts",
+        nargs="*",
+        default=None,
+        help=(
+            "Optional explicit 24-hour window starts. By default, uses the "
+            "same twelve windows as demo_test.py. If omitted with a custom "
+            "--start-target, a single window is run for backward compatibility."
+        ),
+    )
     parser.add_argument("--rolling-steps", type=int, default=ROLLING_STEPS)
     parser.add_argument("--excluded-zones", type=int, nargs="*", default=EXCLUDED_ZONES)
     parser.add_argument("--mc-samples", type=int, default=10)
@@ -1166,6 +1178,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         excluded_zones=args.excluded_zones,
         include_dropoff=rolling_od,
     )
+    window_starts = resolve_window_starts(args)
+    validate_windows(df, window_starts, args.rolling_steps)
+    print(
+        "Window starts:",
+        ", ".join(str(start) for start in window_starts),
+    )
     lookup_df = pd.read_csv(args.lookup).drop_duplicates(subset="LocationID")
     graphs = load_graph_contexts(
         specs=specs,
@@ -1179,15 +1197,16 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     if rolling_od:
         od_zone_names = load_od_zone_names(args)
         od_location_to_zone = _load_location_lookup(args.lookup)
-        rolling_od_cache[args.start_target] = build_rolling_od_graph_context(
+        first_target_hour = window_starts[0]
+        rolling_od_cache[first_target_hour] = build_rolling_od_graph_context(
             args=args,
             df=df,
             lookup_df=lookup_df,
             zone_names=od_zone_names,
             location_to_zone=od_location_to_zone,
-            target_hour=args.start_target,
+            target_hour=first_target_hour,
         )
-        graphs["od"] = rolling_od_cache[args.start_target]
+        graphs["od"] = rolling_od_cache[first_target_hour]
     residual_base_context: Optional[GraphContext] = None
     if residual_graph_enabled:
         residual_zone_names = load_od_zone_names(args)
@@ -1215,104 +1234,129 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     residual_summary_records: List[Dict[str, object]] = []
     historical_step_frames: List[pd.DataFrame] = []
 
-    for step in range(args.rolling_steps):
-        target_hour = args.start_target + pd.Timedelta(hours=step)
-        print(f"\n///// Experiment 5 target hour: {target_hour} step {step} /////")
-
-        set_random_seed(args.seed + step)
-        if rolling_od:
-            if target_hour not in rolling_od_cache:
-                rolling_od_cache[target_hour] = build_rolling_od_graph_context(
-                    args=args,
-                    df=df,
-                    lookup_df=lookup_df,
-                    zone_names=od_zone_names,
-                    location_to_zone=od_location_to_zone,
-                    target_hour=target_hour,
-                )
-            graphs["od"] = rolling_od_cache[target_hour]
-
-        baseline_df = run_multiscale_temporal_baseline(
-            df=df,
-            manager=manager,
-            target_hour=target_hour,
-            zones=zones,
-            zone_hourly_counts=zone_hourly_counts,
+    for window_idx, window_start in enumerate(window_starts, start=1):
+        print(
+            f"\n===== Experiment 5 window {window_idx}/{len(window_starts)} "
+            f"start={window_start} ====="
         )
-        if residual_graph_enabled:
-            cache_baseline_predictions(
-                prediction_cache=residual_prediction_cache,
-                baseline_df=baseline_df,
+        for step in range(args.rolling_steps):
+            global_step = (window_idx - 1) * args.rolling_steps + step
+            target_hour = window_start + pd.Timedelta(hours=step)
+            print(
+                f"\n///// Experiment 5 target hour: {target_hour} "
+                f"window {window_idx} step {step} /////"
             )
-            if residual_base_context is None:
-                raise RuntimeError("Residual graph context was not initialized.")
-            residual_context, residual_summary = build_residual_graph_context(
-                args=args,
+
+            set_random_seed(args.seed + global_step)
+            if rolling_od:
+                if target_hour not in rolling_od_cache:
+                    rolling_od_cache[target_hour] = build_rolling_od_graph_context(
+                        args=args,
+                        df=df,
+                        lookup_df=lookup_df,
+                        zone_names=od_zone_names,
+                        location_to_zone=od_location_to_zone,
+                        target_hour=target_hour,
+                    )
+                graphs["od"] = rolling_od_cache[target_hour]
+
+            baseline_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
-                lookup_df=lookup_df,
                 target_hour=target_hour,
                 zones=zones,
                 zone_hourly_counts=zone_hourly_counts,
-                graph_context=residual_base_context,
-                prediction_cache=residual_prediction_cache,
             )
-            graphs["residual"] = residual_context
-            residual_summary_records.append(residual_summary)
-            summary_log_path = residual_graph_summary_path(args)
-            summary_log_path.parent.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
-
-        history_df = df[df["datetime"] < target_hour]
-        step_df = compute_confidence_components(
-            step_df=baseline_df,
-            history_df=history_df,
-        )
-        valid_locations = finite_step_zone_ids(step_df=step_df, candidate_zones=zones)
-        split_sets = make_location_split_sets(
-            location_ids=valid_locations,
-            seed=args.seed + step,
-            train_ratio=args.train_ratio,
-            val_ratio=args.val_ratio,
-        )
-        history_frames = filter_history_frames_before(historical_step_frames, target_hour)
-
-        hour_messages: List[str] = []
-        for graph_key in requested_graphs:
-            spec = specs[graph_key]
-            if graph_key == "no_graph":
-                prediction_df = collect_no_graph_predictions(
-                    target_hour=target_hour,
-                    step_df=step_df,
-                    split_sets=split_sets,
-                    spec=spec,
+            if residual_graph_enabled:
+                cache_baseline_predictions(
+                    prediction_cache=residual_prediction_cache,
+                    baseline_df=baseline_df,
                 )
-                hourly_record = hourly_record_from_predictions(
+                if residual_base_context is None:
+                    raise RuntimeError("Residual graph context was not initialized.")
+                residual_context, residual_summary = build_residual_graph_context(
+                    args=args,
+                    df=df,
+                    manager=manager,
+                    lookup_df=lookup_df,
                     target_hour=target_hour,
-                    predictions=prediction_df,
-                    spec=spec,
+                    zones=zones,
+                    zone_hourly_counts=zone_hourly_counts,
+                    graph_context=residual_base_context,
+                    prediction_cache=residual_prediction_cache,
                 )
-            else:
-                prediction_df, hourly_record = run_graph_variant(
-                    target_hour=target_hour,
-                    graph_key=graph_key,
-                    graph=graphs[graph_key],
-                    step_df=step_df,
-                    history_frames=history_frames,
-                    split_sets=split_sets,
-                    device=device,
-                    cfg=gnn_cfg,
-                    seed=args.seed + step,
-                    spec=spec,
-                    use_edge_weight=args.use_edge_weight,
+                residual_summary["window_id"] = window_idx
+                residual_summary["window_start"] = window_start
+                residual_summary["window_step"] = step
+                graphs["residual"] = residual_context
+                residual_summary_records.append(residual_summary)
+                summary_log_path = residual_graph_summary_path(args)
+                summary_log_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+
+            history_df = df[df["datetime"] < target_hour]
+            step_df = compute_confidence_components(
+                step_df=baseline_df,
+                history_df=history_df,
+            )
+            step_df["window_id"] = window_idx
+            step_df["window_start"] = window_start
+            step_df["window_step"] = step
+            valid_locations = finite_step_zone_ids(step_df=step_df, candidate_zones=zones)
+            split_sets = make_location_split_sets(
+                location_ids=valid_locations,
+                seed=args.seed + global_step,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+            )
+            history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+
+            hour_messages: List[str] = []
+            for graph_key in requested_graphs:
+                spec = specs[graph_key]
+                if graph_key == "no_graph":
+                    prediction_df = collect_no_graph_predictions(
+                        target_hour=target_hour,
+                        step_df=step_df,
+                        split_sets=split_sets,
+                        spec=spec,
+                    )
+                    hourly_record = hourly_record_from_predictions(
+                        target_hour=target_hour,
+                        predictions=prediction_df,
+                        spec=spec,
+                    )
+                else:
+                    prediction_df, hourly_record = run_graph_variant(
+                        target_hour=target_hour,
+                        graph_key=graph_key,
+                        graph=graphs[graph_key],
+                        step_df=step_df,
+                        history_frames=history_frames,
+                        split_sets=split_sets,
+                        device=device,
+                        cfg=gnn_cfg,
+                        seed=args.seed + global_step,
+                        spec=spec,
+                        use_edge_weight=args.use_edge_weight,
+                    )
+
+                prediction_df["window_id"] = window_idx
+                prediction_df["window_start"] = window_start
+                prediction_df["window_step"] = step
+                hourly_record.update(
+                    {
+                        "window_id": window_idx,
+                        "window_start": window_start,
+                        "window_step": step,
+                    }
                 )
+                detailed_frames.append(prediction_df)
+                hourly_records.append(hourly_record)
+                hour_messages.append(f"{graph_key} MAE={hourly_record['hourly_mae']:.4f}")
 
-            detailed_frames.append(prediction_df)
-            hourly_records.append(hourly_record)
-            hour_messages.append(f"{graph_key} MAE={hourly_record['hourly_mae']:.4f}")
-
-        print(f"[{target_hour}] " + ", ".join(hour_messages))
-        historical_step_frames.append(step_df.copy())
+            print(f"[{target_hour}] " + ", ".join(hour_messages))
+            historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)
     hourly_df = pd.DataFrame(hourly_records)
