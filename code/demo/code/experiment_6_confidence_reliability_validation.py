@@ -47,6 +47,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     ManagerConfig,
     MultiScaleModelManager,
     SplitMasks,
+    build_graph_context,
     build_historical_gnn_training_data,
     build_gnn_features,
     build_zone_hourly_counts,
@@ -63,9 +64,15 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     set_random_seed,
     validate_windows,
 )
+from residual_graph_utils import (
+    build_dynamic_residual_graph_context,
+    residual_graph_summary_path,
+)
 
 
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_6_tcn"
+DEFAULT_GRAPH_TYPE = "residual"
+DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
 EXPERIMENT_MODE = "learned_softmax"
 OUTPUT_STEM = "experiment_6_confidence_reliability_validation"
 CONFIDENCE_GROUP_ORDER = [
@@ -82,6 +89,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
     parser.add_argument("--edge-csv", type=Path, default=DEFAULT_EDGE_WEIGHT_MATRIX)
+    parser.add_argument(
+        "--graph-type",
+        choices=["residual", "od"],
+        default=DEFAULT_GRAPH_TYPE,
+        help="Graph used by residual GraphSAGE. Default builds dynamic residual graphs.",
+    )
+    parser.add_argument(
+        "--residual-window-hours",
+        type=int,
+        default=DEFAULT_RESIDUAL_WINDOW_HOURS,
+        help="Historical base-residual window used to build each residual graph.",
+    )
+    parser.add_argument("--residual-top-k", type=int, default=10)
+    parser.add_argument("--residual-min-corr", type=float, default=0.0)
+    parser.add_argument("--residual-use-signed-corr", action="store_true")
+    parser.add_argument("--residual-symmetrize", action="store_true")
+    parser.add_argument(
+        "--residual-graph-dir",
+        type=Path,
+        default=None,
+        help="Directory for generated residual graph CSVs. Defaults to results/residual_graphs.",
+    )
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
@@ -146,6 +175,12 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.quantile_bins < 2:
         parser.error("--quantile-bins must be at least 2.")
+    if args.residual_window_hours <= 0:
+        parser.error("--residual-window-hours must be > 0.")
+    if args.residual_top_k < 0:
+        parser.error("--residual-top-k must be >= 0.")
+    if args.residual_min_corr < 0:
+        parser.error("--residual-min-corr must be >= 0.")
     return args
 
 
@@ -365,7 +400,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
     print("Checkpoint dir:", args.checkpoint_dir)
     print("Confidence mode:", EXPERIMENT_MODE)
 
-    df, _lookup_df, graph = load_required_data(
+    df, lookup_df, graph_template = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
@@ -377,7 +412,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
         "Window starts:",
         ", ".join(str(start) for start in window_starts),
     )
-    zones = select_zones(df, graph, args.max_zones)
+    zones = select_zones(df, graph_template, args.max_zones)
     print("Graph-compatible zones selected:", len(zones))
 
     zone_hourly_counts = build_zone_hourly_counts(df)
@@ -393,6 +428,8 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
 
     detailed_frames: List[pd.DataFrame] = []
     historical_step_frames: List[pd.DataFrame] = []
+    residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
+    residual_summary_records: List[Dict[str, object]] = []
     for window_idx, window_start in enumerate(window_starts, start=1):
         print(
             f"\n===== Experiment 6 window {window_idx}/{len(window_starts)} "
@@ -414,6 +451,32 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                 zones=zones,
                 zone_hourly_counts=zone_hourly_counts,
             )
+            if args.graph_type == "residual":
+                graph, residual_summary = build_dynamic_residual_graph_context(
+                    args=args,
+                    df=df,
+                    manager=manager,
+                    lookup_df=lookup_df,
+                    target_hour=target_hour,
+                    zones=zones,
+                    zone_hourly_counts=zone_hourly_counts,
+                    graph_context=graph_template,
+                    prediction_cache=residual_prediction_cache,
+                    build_graph_context_fn=build_graph_context,
+                )
+                residual_summary.update(
+                    {
+                        "window_id": window_idx,
+                        "window_start": window_start,
+                        "window_step": step,
+                    }
+                )
+                residual_summary_records.append(residual_summary)
+                summary_log_path = residual_graph_summary_path(args)
+                summary_log_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+            else:
+                graph = graph_template
             history_df = df[df["datetime"] < target_hour]
             step_df = compute_confidence_components(step_df=baseline_df, history_df=history_df)
             step_df["window_id"] = window_idx

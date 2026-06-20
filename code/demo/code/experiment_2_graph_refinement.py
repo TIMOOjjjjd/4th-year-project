@@ -46,6 +46,10 @@ from confidence_softmax import (
 )
 from gnn_model import MultiScaleGraphSAGE
 from persistent_tcn import ManagerConfig, MultiScaleModelManager
+from residual_graph_utils import (
+    build_dynamic_residual_graph_context,
+    residual_graph_summary_path,
+)
 
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -62,6 +66,8 @@ DEFAULT_LOOKUP_PATH = BASE_DIR / "taxi-zone-lookup.csv"
 DEFAULT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_2_tcn"
 DEFAULT_RESULTS_DIR = BASE_DIR / "results"
+DEFAULT_GRAPH_TYPE = "residual"
+DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
 ROLLING_STEPS = 24
@@ -179,6 +185,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
     parser.add_argument("--edge-csv", type=Path, default=DEFAULT_EDGE_WEIGHT_MATRIX)
+    parser.add_argument(
+        "--graph-type",
+        choices=["residual", "od"],
+        default=DEFAULT_GRAPH_TYPE,
+        help="Graph used by residual GraphSAGE. Default builds dynamic residual graphs.",
+    )
+    parser.add_argument(
+        "--residual-window-hours",
+        type=int,
+        default=DEFAULT_RESIDUAL_WINDOW_HOURS,
+        help="Historical base-residual window used to build each residual graph.",
+    )
+    parser.add_argument("--residual-top-k", type=int, default=10)
+    parser.add_argument("--residual-min-corr", type=float, default=0.0)
+    parser.add_argument("--residual-use-signed-corr", action="store_true")
+    parser.add_argument("--residual-symmetrize", action="store_true")
+    parser.add_argument(
+        "--residual-graph-dir",
+        type=Path,
+        default=None,
+        help="Directory for generated residual graph CSVs. Defaults to results/residual_graphs.",
+    )
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
@@ -219,7 +247,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip writing experiment_2_graph_refinement_metrics.png.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.residual_window_hours <= 0:
+        parser.error("--residual-window-hours must be > 0.")
+    if args.residual_top_k < 0:
+        parser.error("--residual-top-k must be >= 0.")
+    if args.residual_min_corr < 0:
+        parser.error("--residual-min-corr must be >= 0.")
+    return args
 
 
 def normalize_window_starts(values: Optional[Sequence[str]]) -> List[pd.Timestamp]:
@@ -1193,7 +1228,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
 
-    df, _lookup_df, graph = load_required_data(
+    df, lookup_df, graph_template = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
@@ -1221,6 +1256,8 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     detailed_records: List[Dict[str, object]] = []
     error_store: Dict[str, List[np.ndarray]] = {model_id: [] for model_id in MODEL_ORDER}
     historical_step_frames: List[pd.DataFrame] = []
+    residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
+    residual_summary_records: List[Dict[str, object]] = []
 
     for window_idx, window_start in enumerate(window_starts, start=1):
         print(
@@ -1246,6 +1283,32 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zone_hourly_counts=zone_hourly_counts,
                 prior_scores=prior_scores,
             )
+            if args.graph_type == "residual":
+                graph, residual_summary = build_dynamic_residual_graph_context(
+                    args=args,
+                    df=df,
+                    manager=manager,
+                    lookup_df=lookup_df,
+                    target_hour=target_hour,
+                    zones=zones,
+                    zone_hourly_counts=zone_hourly_counts,
+                    graph_context=graph_template,
+                    prediction_cache=residual_prediction_cache,
+                    build_graph_context_fn=build_graph_context,
+                )
+                residual_summary.update(
+                    {
+                        "window_id": window_idx,
+                        "window_start": window_start,
+                        "window_step": step,
+                    }
+                )
+                residual_summary_records.append(residual_summary)
+                summary_log_path = residual_graph_summary_path(args)
+                summary_log_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+            else:
+                graph = graph_template
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start
             step_df["window_step"] = step
