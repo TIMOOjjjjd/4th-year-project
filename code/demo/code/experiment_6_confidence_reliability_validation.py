@@ -70,7 +70,7 @@ from residual_graph_utils import (
 )
 
 
-DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_experiment_6_tcn"
+DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_GRAPH_TYPE = "residual"
 DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
 EXPERIMENT_MODE = "learned_softmax"

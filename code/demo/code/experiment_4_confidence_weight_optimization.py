@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-dir",
         type=Path,
-        default=BASE_DIR / "checkpoints_experiment_4_tcn",
+        default=BASE_DIR / "checkpoints_tcn_shared_v1",
     )
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
