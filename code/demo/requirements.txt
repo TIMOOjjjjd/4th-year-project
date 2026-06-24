@@ -1,0 +1,26 @@
+# Core data stack
+numpy
+pandas
+pyarrow
+scipy
+scikit-learn
+
+# Plotting and map visualization
+matplotlib
+folium
+branca
+geojson
+
+# Deep learning
+torch
+torch-geometric
+
+# Time-series baseline
+statsmodels
+
+# Optional GUI map viewer
+PyQt5
+PyQtWebEngine
+
+# Test runner
+pytest
