@@ -585,7 +585,12 @@ def get_cached_base_prediction_sequence(
     failures = 0
 
     if missing_hours:
-        model, _ = manager._load(zone_int)
+        print(
+            f"    residual base prediction cache zone={zone_int} "
+            f"missing_hours={len(missing_hours)}",
+            flush=True,
+        )
+        model, scaler = manager._load(zone_int)
         model.eval()
         for hour in missing_hours:
             key = (zone_int, hour)
@@ -596,16 +601,15 @@ def get_cached_base_prediction_sequence(
                     zone_id=zone_int,
                     end_inclusive=context_end,
                 )
-                scaler = manager._fit_scaler_hist(hourly, fit_until_exclusive=hour)
                 x_last = manager._build_inference_window(
                     hourly=hourly,
                     scaler=scaler,
                     context_end=context_end,
                 )
                 with torch.no_grad():
-                    mean_scaled, _ = model.mc_predict(x_last, manager.cfg.M_mc_test)
-                prediction = scaler.inverse_transform(mean_scaled.cpu().numpy())[0, 0]
-                prediction_cache[key] = float(prediction)
+                    prediction_scaled = model(x_last).cpu().numpy()
+                prediction = manager._inverse_values(prediction_scaled, scaler)[0, 0]
+                prediction_cache[key] = float(max(0.0, prediction))
             except Exception:  # noqa: BLE001
                 failures += 1
                 prediction_cache[key] = np.nan
@@ -634,7 +638,9 @@ def build_residual_history_frames(
     # A checkpoint trained through target_hour - 1 is allowed here because the
     # graph is built for target_hour and uses only information already historical
     # at that point. The target_hour true value itself is never included.
-    for zone_id in zones:
+    total_zones = len(zones)
+    for zone_pos, zone_id in enumerate(zones, start=1):
+        print(f"[{target_hour}] residual meta check zone {zone_id}", flush=True)
         trained_until = manager._load_meta(int(zone_id))
         if trained_until is not None and trained_until > context_end:
             raise RuntimeError(
@@ -653,7 +659,7 @@ def build_residual_history_frames(
     y_pred = pd.DataFrame(np.nan, index=history_hours, columns=zone_names)
 
     prediction_failures = 0
-    for zone_id in zones:
+    for zone_pos, zone_id in enumerate(zones, start=1):
         zone_int = int(zone_id)
         zone_name = graph_context.location_to_zone.get(zone_int)
         if zone_name is None or zone_name not in y_true.columns:
@@ -665,6 +671,14 @@ def build_residual_history_frames(
         except KeyError:
             y_true[zone_name] = 0.0
 
+        missing_count = sum(
+            1 for hour in history_hours if (zone_int, pd.Timestamp(hour)) not in prediction_cache
+        )
+        print(
+            f"[{target_hour}] residual history zone {zone_pos}/{total_zones}: "
+            f"{zone_int} missing_base_predictions={missing_count}",
+            flush=True,
+        )
         predictions, failures = get_cached_base_prediction_sequence(
             prediction_cache=prediction_cache,
             manager=manager,
