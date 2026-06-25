@@ -53,6 +53,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     build_zone_hourly_counts,
     clean_checkpoint_dir,
     compute_confidence_components,
+    compute_prior_scores_from_zone_hourly_counts,
     filter_history_frames_before,
     load_required_data,
     make_location_split_sets,
@@ -427,10 +428,11 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
     )
 
     detailed_frames: List[pd.DataFrame] = []
-    historical_step_frames: List[pd.DataFrame] = []
     residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
     residual_summary_records: List[Dict[str, object]] = []
     for window_idx, window_start in enumerate(window_starts, start=1):
+        # Keep GNN residual-training snapshots local to this evaluation window.
+        historical_step_frames: List[pd.DataFrame] = []
         print(
             f"\n===== Experiment 6 window {window_idx}/{len(window_starts)} "
             f"start={window_start} ====="
@@ -477,8 +479,14 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
             else:
                 graph = graph_template
-            history_df = df[df["datetime"] < target_hour]
-            step_df = compute_confidence_components(step_df=baseline_df, history_df=history_df)
+            prior_scores = compute_prior_scores_from_zone_hourly_counts(
+                zone_hourly_counts=zone_hourly_counts,
+                target_hour=target_hour,
+            )
+            step_df = compute_confidence_components(
+                step_df=baseline_df,
+                prior_scores=prior_scores,
+            )
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start
             step_df["window_step"] = step

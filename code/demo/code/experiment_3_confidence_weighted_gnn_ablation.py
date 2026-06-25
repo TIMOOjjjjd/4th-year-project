@@ -448,15 +448,18 @@ def run_multiscale_temporal_baseline(
 
     for zone_id in zones:
         try:
-            guard_against_future_checkpoint(manager, int(zone_id), target_hour)
-            manager.train_and_predict_if_needed(df, int(zone_id), target_hour, auto_train=True)
-            point, std, _ = manager.predict_with_uncertainty(df, int(zone_id), target_hour)
+            zone_int = int(zone_id)
+            guard_against_future_checkpoint(manager, zone_int, target_hour)
+            context_end = target_hour - manager._forecast_delta
+            if not manager.has_checkpoint(zone_int):
+                manager.train_once(df, zone_int, context_end)
+            point, std, _ = manager.predict_with_uncertainty(df, zone_int, target_hour)
             true_value = float(y_true_dict.get(zone_id, 0.0))
-            history_means = compute_history_means(zone_hourly_counts, int(zone_id), target_hour)
+            history_means = compute_history_means(zone_hourly_counts, zone_int, target_hour)
             records.append(
                 {
                     "target_hour": target_hour,
-                    "PULocationID": int(zone_id),
+                    "PULocationID": zone_int,
                     "base_pred": float(point),
                     "true_value": true_value,
                     "mc_std": float(std),
@@ -516,6 +519,28 @@ def compute_prior_scores(history_df: pd.DataFrame) -> Dict[int, float]:
     """Prior confidence: zones with richer historical samples get higher weight."""
 
     counts = history_df.groupby("PULocationID").size().astype(float)
+    return normalize_prior_counts(counts)
+
+
+def compute_prior_scores_from_zone_hourly_counts(
+    zone_hourly_counts: pd.Series,
+    target_hour: pd.Timestamp,
+) -> Dict[int, float]:
+    """Compute prior confidence without repeatedly filtering the trip dataframe."""
+
+    if zone_hourly_counts.empty:
+        return {}
+    datetime_index = zone_hourly_counts.index.get_level_values("datetime")
+    counts = (
+        zone_hourly_counts[datetime_index < pd.Timestamp(target_hour)]
+        .groupby(level=0)
+        .sum()
+        .astype(float)
+    )
+    return normalize_prior_counts(counts)
+
+
+def normalize_prior_counts(counts: pd.Series) -> Dict[int, float]:
     if counts.empty:
         return {}
 
@@ -574,7 +599,8 @@ def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float
 
 def compute_confidence_components(
     step_df: pd.DataFrame,
-    history_df: pd.DataFrame,
+    history_df: Optional[pd.DataFrame] = None,
+    prior_scores: Optional[Dict[int, float]] = None,
 ) -> pd.DataFrame:
     """Attach confidence components needed by the ablation.
 
@@ -585,7 +611,10 @@ def compute_confidence_components(
     """
 
     step_df = step_df.copy()
-    prior_scores = compute_prior_scores(history_df)
+    if prior_scores is None:
+        if history_df is None:
+            raise ValueError("Either history_df or prior_scores is required.")
+        prior_scores = compute_prior_scores(history_df)
     stability_scores = compute_stability_scores(step_df)
     history_scores = compute_history_consistency_scores(step_df)
 
@@ -1318,11 +1347,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_frames: List[pd.DataFrame] = []
     hourly_records: List[Dict[str, object]] = []
-    historical_step_frames: List[pd.DataFrame] = []
     residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
     residual_summary_records: List[Dict[str, object]] = []
 
     for window_idx, window_start in enumerate(window_starts, start=1):
+        # Keep GNN residual-training snapshots local to this evaluation window.
+        historical_step_frames: List[pd.DataFrame] = []
         print(
             f"\n===== Experiment 3 window {window_idx}/{len(window_starts)} "
             f"start={window_start} ====="
@@ -1369,10 +1399,13 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
             else:
                 graph = graph_template
-            history_df = df[df["datetime"] < target_hour]
+            prior_scores = compute_prior_scores_from_zone_hourly_counts(
+                zone_hourly_counts=zone_hourly_counts,
+                target_hour=target_hour,
+            )
             step_df = compute_confidence_components(
                 step_df=baseline_df,
-                history_df=history_df,
+                prior_scores=prior_scores,
             )
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start

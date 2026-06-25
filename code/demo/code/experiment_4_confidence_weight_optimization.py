@@ -55,6 +55,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     clamp_score,
     clean_checkpoint_dir,
     compute_prior_scores,
+    compute_prior_scores_from_zone_hourly_counts,
     compute_stability_scores,
     evaluate_refined_predictions,
     filter_history_frames_before,
@@ -238,11 +239,15 @@ def compute_history_consistency_scores(step_df: pd.DataFrame) -> Dict[int, float
 
 def compute_confidence_components(
     step_df: pd.DataFrame,
-    history_df: pd.DataFrame,
+    history_df: Optional[pd.DataFrame] = None,
+    prior_scores: Optional[Dict[int, float]] = None,
 ) -> pd.DataFrame:
     """Attach the three confidence components used by Experiment 4."""
     step_df = step_df.copy()
-    prior_scores = compute_prior_scores(history_df)
+    if prior_scores is None:
+        if history_df is None:
+            raise ValueError("Either history_df or prior_scores is required.")
+        prior_scores = compute_prior_scores(history_df)
     stability_scores = compute_stability_scores(step_df)
     history_scores = compute_history_consistency_scores(step_df)
 
@@ -976,11 +981,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_frames: List[pd.DataFrame] = []
     hourly_records: List[Dict[str, object]] = []
-    historical_step_frames: List[pd.DataFrame] = []
     residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
     residual_summary_records: List[Dict[str, object]] = []
 
     for window_idx, window_start in enumerate(window_starts, start=1):
+        # Keep GNN residual-training snapshots local to this evaluation window.
+        historical_step_frames: List[pd.DataFrame] = []
         print(
             f"\n===== Experiment 4 window {window_idx}/{len(window_starts)} "
             f"start={window_start} ====="
@@ -1027,10 +1033,13 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
             else:
                 graph = graph_template
-            history_df = df[df["datetime"] < target_hour]
+            prior_scores = compute_prior_scores_from_zone_hourly_counts(
+                zone_hourly_counts=zone_hourly_counts,
+                target_hour=target_hour,
+            )
             step_df = compute_confidence_components(
                 step_df=baseline_df,
-                history_df=history_df,
+                prior_scores=prior_scores,
             )
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start

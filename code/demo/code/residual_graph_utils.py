@@ -7,6 +7,7 @@ from typing import Callable, Dict, Sequence, Tuple, TypeVar
 
 import numpy as np
 import pandas as pd
+import torch
 
 from build_residual_graph import build_residual_correlation_graph
 
@@ -39,18 +40,38 @@ def get_cached_base_prediction_sequence(
     target_hours: Sequence[pd.Timestamp],
 ) -> Tuple[list[float], int]:
     failures = 0
+    zone_int = int(zone_id)
     normalized_hours = [pd.Timestamp(hour) for hour in target_hours]
-    for hour in normalized_hours:
-        key = (int(zone_id), hour)
-        if key in prediction_cache:
-            continue
-        try:
-            prediction_cache[key] = float(manager.predict(df, int(zone_id), hour))
-        except Exception:  # noqa: BLE001
-            failures += 1
-            prediction_cache[key] = np.nan
+    missing_hours = [
+        hour for hour in normalized_hours if (zone_int, hour) not in prediction_cache
+    ]
 
-    return [prediction_cache[(int(zone_id), hour)] for hour in normalized_hours], failures
+    if missing_hours:
+        model, scaler = manager._load(zone_int)
+        model.eval()
+        for hour in missing_hours:
+            key = (zone_int, hour)
+            try:
+                context_end = hour - manager._forecast_delta
+                hourly = manager._prepare_zone_series(
+                    df=df,
+                    zone_id=zone_int,
+                    end_inclusive=context_end,
+                )
+                input_last = manager._build_inference_window(
+                    hourly=hourly,
+                    scaler=scaler,
+                    context_end=context_end,
+                )
+                with torch.no_grad():
+                    prediction_scaled = model(input_last).cpu().numpy()
+                prediction = manager._inverse_values(prediction_scaled, scaler)[0, 0]
+                prediction_cache[key] = float(max(0.0, prediction))
+            except Exception:  # noqa: BLE001
+                failures += 1
+                prediction_cache[key] = np.nan
+
+    return [prediction_cache[(zone_int, hour)] for hour in normalized_hours], failures
 
 
 def build_residual_history_frames(

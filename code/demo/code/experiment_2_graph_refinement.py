@@ -397,6 +397,28 @@ def compute_prior_scores(history_df: pd.DataFrame) -> Dict[int, float]:
     """Higher scores for zones with richer past history."""
 
     counts = history_df.groupby("PULocationID").size().astype(float)
+    return normalize_prior_counts(counts)
+
+
+def compute_prior_scores_from_zone_hourly_counts(
+    zone_hourly_counts: pd.Series,
+    target_hour: pd.Timestamp,
+) -> Dict[int, float]:
+    """Higher scores for zones with richer past history, using precomputed counts."""
+
+    if zone_hourly_counts.empty:
+        return {}
+    datetime_index = zone_hourly_counts.index.get_level_values("datetime")
+    counts = (
+        zone_hourly_counts[datetime_index < pd.Timestamp(target_hour)]
+        .groupby(level=0)
+        .sum()
+        .astype(float)
+    )
+    return normalize_prior_counts(counts)
+
+
+def normalize_prior_counts(counts: pd.Series) -> Dict[int, float]:
     if counts.empty:
         return {}
 
@@ -505,7 +527,10 @@ def run_multiscale_temporal_baseline(
 
     for zone_id in zones:
         try:
-            manager.train_and_predict_if_needed(df, int(zone_id), target_hour, auto_train=True)
+            zone_int = int(zone_id)
+            context_end = target_hour - manager._forecast_delta
+            if not manager.has_checkpoint(zone_int):
+                manager.train_once(df, zone_int, context_end)
             point, std, _ = manager.predict_with_uncertainty(df, int(zone_id), target_hour)
             true_value = float(y_true_dict.get(zone_id, 0.0))
             history_means = compute_history_means(zone_hourly_counts, int(zone_id), target_hour)
@@ -1255,11 +1280,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_records: List[Dict[str, object]] = []
     error_store: Dict[str, List[np.ndarray]] = {model_id: [] for model_id in MODEL_ORDER}
-    historical_step_frames: List[pd.DataFrame] = []
     residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
     residual_summary_records: List[Dict[str, object]] = []
 
     for window_idx, window_start in enumerate(window_starts, start=1):
+        # Keep GNN residual-training snapshots local to this evaluation window.
+        historical_step_frames: List[pd.DataFrame] = []
         print(
             f"\n===== Experiment 2 window {window_idx}/{len(window_starts)} "
             f"start={window_start} ====="
@@ -1273,8 +1299,10 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             )
 
             set_random_seed(args.seed + global_step)
-            history_df = df[df["datetime"] < target_hour]
-            prior_scores = compute_prior_scores(history_df)
+            prior_scores = compute_prior_scores_from_zone_hourly_counts(
+                zone_hourly_counts=zone_hourly_counts,
+                target_hour=target_hour,
+            )
             step_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
