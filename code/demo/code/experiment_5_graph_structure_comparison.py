@@ -1252,6 +1252,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             set_random_seed(args.seed + global_step)
             if rolling_od:
                 if target_hour not in rolling_od_cache:
+                    print(f"[{target_hour}] start rolling OD graph", flush=True)
                     rolling_od_cache[target_hour] = build_rolling_od_graph_context(
                         args=args,
                         df=df,
@@ -1260,8 +1261,10 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                         location_to_zone=od_location_to_zone,
                         target_hour=target_hour,
                     )
+                    print(f"[{target_hour}] done rolling OD graph", flush=True)
                 graphs["od"] = rolling_od_cache[target_hour]
 
+            print(f"[{target_hour}] start TCN baseline", flush=True)
             baseline_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
@@ -1269,7 +1272,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zones=zones,
                 zone_hourly_counts=zone_hourly_counts,
             )
+            print(f"[{target_hour}] done TCN baseline", flush=True)
             if residual_graph_enabled:
+                print(f"[{target_hour}] start residual graph", flush=True)
                 cache_baseline_predictions(
                     prediction_cache=residual_prediction_cache,
                     baseline_df=baseline_df,
@@ -1295,7 +1300,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 summary_log_path = residual_graph_summary_path(args)
                 summary_log_path.parent.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+                print(f"[{target_hour}] done residual graph", flush=True)
 
+            print(f"[{target_hour}] start confidence and split prep", flush=True)
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,
@@ -1315,9 +1322,15 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 val_ratio=args.val_ratio,
             )
             history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+            print(
+                f"[{target_hour}] done confidence and split prep; "
+                f"history_snapshots={len(history_frames)}",
+                flush=True,
+            )
 
             hour_messages: List[str] = []
             for graph_key in requested_graphs:
+                print(f"[{target_hour}] start graph variant {graph_key}", flush=True)
                 spec = specs[graph_key]
                 if graph_key == "no_graph":
                     prediction_df = collect_no_graph_predictions(
@@ -1359,8 +1372,13 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 detailed_frames.append(prediction_df)
                 hourly_records.append(hourly_record)
                 hour_messages.append(f"{graph_key} MAE={hourly_record['hourly_mae']:.4f}")
+                print(
+                    f"[{target_hour}] done graph variant {graph_key} "
+                    f"MAE={hourly_record['hourly_mae']:.4f}",
+                    flush=True,
+                )
 
-            print(f"[{target_hour}] " + ", ".join(hour_messages))
+            print(f"[{target_hour}] " + ", ".join(hour_messages), flush=True)
             historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)

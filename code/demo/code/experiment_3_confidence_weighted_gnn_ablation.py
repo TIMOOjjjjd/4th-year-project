@@ -446,12 +446,21 @@ def run_multiscale_temporal_baseline(
     y_true_dict = get_true_counts(df, target_hour)
     records: List[Dict[str, object]] = []
 
-    for zone_id in zones:
+    total_zones = len(zones)
+    for zone_pos, zone_id in enumerate(zones, start=1):
         try:
             zone_int = int(zone_id)
+            print(
+                f"[{target_hour}] baseline zone {zone_pos}/{total_zones}: {zone_int}",
+                flush=True,
+            )
             guard_against_future_checkpoint(manager, zone_int, target_hour)
             context_end = target_hour - manager._forecast_delta
             if not manager.has_checkpoint(zone_int):
+                print(
+                    f"[{target_hour}] training missing TCN checkpoint for zone {zone_int}",
+                    flush=True,
+                )
                 manager.train_once(df, zone_int, context_end)
             point, std, _ = manager.predict_with_uncertainty(df, zone_int, target_hour)
             true_value = float(y_true_dict.get(zone_id, 0.0))

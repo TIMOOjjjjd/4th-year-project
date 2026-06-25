@@ -446,6 +446,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             )
 
             set_random_seed(args.seed + global_step)
+            print(f"[{target_hour}] start TCN baseline", flush=True)
             baseline_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
@@ -453,7 +454,9 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                 zones=zones,
                 zone_hourly_counts=zone_hourly_counts,
             )
+            print(f"[{target_hour}] done TCN baseline", flush=True)
             if args.graph_type == "residual":
+                print(f"[{target_hour}] start residual graph", flush=True)
                 graph, residual_summary = build_dynamic_residual_graph_context(
                     args=args,
                     df=df,
@@ -477,8 +480,10 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                 summary_log_path = residual_graph_summary_path(args)
                 summary_log_path.parent.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+                print(f"[{target_hour}] done residual graph", flush=True)
             else:
                 graph = graph_template
+            print(f"[{target_hour}] start confidence and split prep", flush=True)
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,
@@ -508,6 +513,11 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                 history_frames=history_frames,
                 graph=graph,
             )
+            print(
+                f"[{target_hour}] done confidence and split prep; "
+                f"history_snapshots={len(history_frames)}",
+                flush=True,
+            )
             train_splits: Optional[SplitMasks] = None
             if train_data is not None:
                 try:
@@ -521,6 +531,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
                     print(f"[{target_hour}] historical GNN training skipped: {exc}")
                     train_data = None
 
+            print(f"[{target_hour}] start mode {EXPERIMENT_MODE}", flush=True)
             prediction_df, hourly_record = run_single_ablation(
                 target_hour=target_hour,
                 mode=EXPERIMENT_MODE,
@@ -542,7 +553,8 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             ].mean()
             print(
                 f"[{target_hour}] test_MAE={hourly_record['hourly_mae']:.4f} "
-                f"mean_test_confidence={test_mean_confidence:.4f}"
+                f"mean_test_confidence={test_mean_confidence:.4f}",
+                flush=True,
             )
             historical_step_frames.append(step_df.copy())
 

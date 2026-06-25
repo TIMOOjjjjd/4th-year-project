@@ -106,7 +106,8 @@ def build_residual_history_frames(
     y_pred = pd.DataFrame(np.nan, index=history_hours, columns=zone_names)
 
     prediction_failures = 0
-    for zone_id in zones:
+    total_zones = len(zones)
+    for zone_pos, zone_id in enumerate(zones, start=1):
         zone_int = int(zone_id)
         zone_name = graph_context.location_to_zone.get(zone_int)
         if zone_name is None or zone_name not in y_true.columns:
@@ -118,6 +119,14 @@ def build_residual_history_frames(
         except KeyError:
             y_true[zone_name] = 0.0
 
+        missing_count = sum(
+            1 for hour in history_hours if (zone_int, pd.Timestamp(hour)) not in prediction_cache
+        )
+        print(
+            f"[{target_hour}] residual history zone {zone_pos}/{total_zones}: "
+            f"{zone_int} missing_base_predictions={missing_count}",
+            flush=True,
+        )
         predictions, failures = get_cached_base_prediction_sequence(
             prediction_cache=prediction_cache,
             manager=manager,

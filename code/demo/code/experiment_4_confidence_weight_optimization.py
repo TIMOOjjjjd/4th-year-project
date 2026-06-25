@@ -1000,6 +1000,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             )
 
             set_random_seed(args.seed + global_step)
+            print(f"[{target_hour}] start TCN baseline", flush=True)
             baseline_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
@@ -1007,7 +1008,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zones=zones,
                 zone_hourly_counts=zone_hourly_counts,
             )
+            print(f"[{target_hour}] done TCN baseline", flush=True)
             if args.graph_type == "residual":
+                print(f"[{target_hour}] start residual graph", flush=True)
                 graph, residual_summary = build_dynamic_residual_graph_context(
                     args=args,
                     df=df,
@@ -1031,8 +1034,10 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 summary_log_path = residual_graph_summary_path(args)
                 summary_log_path.parent.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+                print(f"[{target_hour}] done residual graph", flush=True)
             else:
                 graph = graph_template
+            print(f"[{target_hour}] start confidence and split prep", flush=True)
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,
@@ -1062,6 +1067,11 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 history_frames=history_frames,
                 graph=graph,
             )
+            print(
+                f"[{target_hour}] done confidence and split prep; "
+                f"history_snapshots={len(history_frames)}",
+                flush=True,
+            )
             train_splits: Optional[SplitMasks] = None
             if train_data is not None:
                 try:
@@ -1077,6 +1087,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
             hour_messages: List[str] = []
             for mode in args.modes:
+                print(f"[{target_hour}] start mode {mode}", flush=True)
                 prediction_df, hourly_record = run_single_mode(
                     target_hour=target_hour,
                     mode=mode,
@@ -1115,8 +1126,13 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                     f"{mode} test_MAE={hourly_record['test_mae']:.4f} "
                     f"({format_weights(weights)})"
                 )
+                print(
+                    f"[{target_hour}] done mode {mode} "
+                    f"test_MAE={hourly_record['test_mae']:.4f}",
+                    flush=True,
+                )
 
-            print(f"[{target_hour}] " + ", ".join(hour_messages))
+            print(f"[{target_hour}] " + ", ".join(hour_messages), flush=True)
             historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.concat(detailed_frames, ignore_index=True)

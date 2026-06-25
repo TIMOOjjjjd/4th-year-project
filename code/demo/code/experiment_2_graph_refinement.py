@@ -525,11 +525,20 @@ def run_multiscale_temporal_baseline(
     y_true_dict = get_true_counts(df, target_hour)
     records: List[Dict[str, object]] = []
 
-    for zone_id in zones:
+    total_zones = len(zones)
+    for zone_pos, zone_id in enumerate(zones, start=1):
         try:
             zone_int = int(zone_id)
+            print(
+                f"[{target_hour}] baseline zone {zone_pos}/{total_zones}: {zone_int}",
+                flush=True,
+            )
             context_end = target_hour - manager._forecast_delta
             if not manager.has_checkpoint(zone_int):
+                print(
+                    f"[{target_hour}] training missing TCN checkpoint for zone {zone_int}",
+                    flush=True,
+                )
                 manager.train_once(df, zone_int, context_end)
             point, std, _ = manager.predict_with_uncertainty(df, int(zone_id), target_hour)
             true_value = float(y_true_dict.get(zone_id, 0.0))
@@ -1303,6 +1312,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,
             )
+            print(f"[{target_hour}] start TCN baseline", flush=True)
             step_df = run_multiscale_temporal_baseline(
                 df=df,
                 manager=manager,
@@ -1311,7 +1321,9 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zone_hourly_counts=zone_hourly_counts,
                 prior_scores=prior_scores,
             )
+            print(f"[{target_hour}] done TCN baseline", flush=True)
             if args.graph_type == "residual":
+                print(f"[{target_hour}] start residual graph", flush=True)
                 graph, residual_summary = build_dynamic_residual_graph_context(
                     args=args,
                     df=df,
@@ -1335,12 +1347,14 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 summary_log_path = residual_graph_summary_path(args)
                 summary_log_path.parent.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
+                print(f"[{target_hour}] done residual graph", flush=True)
             else:
                 graph = graph_template
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start
             step_df["window_step"] = step
 
+            print(f"[{target_hour}] start feature and split prep", flush=True)
             inference_data_by_model = {
                 model_id: build_gnn_features_for_model(model_id, step_df, graph)
                 for model_id in GNN_MODEL_ORDER
@@ -1361,9 +1375,15 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 require_test=True,
             )
             history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+            print(
+                f"[{target_hour}] done feature and split prep; "
+                f"history_snapshots={len(history_frames)}",
+                flush=True,
+            )
             train_data_by_model: Dict[str, Optional[Data]] = {}
             train_splits_by_model: Dict[str, Optional[SplitMasks]] = {}
             for model_id in GNN_MODEL_ORDER:
+                print(f"[{target_hour}] build historical data for {model_id}", flush=True)
                 train_data = build_historical_gnn_training_data(
                     history_frames=history_frames,
                     graph=graph,
@@ -1405,6 +1425,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
             hour_messages = [f"T4 MAE={metrics_t4['MAE']:.4f}"]
             for model_id in GNN_MODEL_ORDER:
+                print(f"[{target_hour}] start model {model_id}", flush=True)
                 result = train_residual_gnn(
                     train_data=train_data_by_model[model_id],
                     train_splits=train_splits_by_model[model_id],
@@ -1438,8 +1459,12 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                     f"{model_id} MAE={metrics['MAE']:.4f} "
                     f"(w={weights[0]:.3f}/{weights[1]:.3f}/{weights[2]:.3f})"
                 )
+                print(
+                    f"[{target_hour}] done model {model_id} MAE={metrics['MAE']:.4f}",
+                    flush=True,
+                )
 
-            print(f"[{target_hour}] " + ", ".join(hour_messages))
+            print(f"[{target_hour}] " + ", ".join(hour_messages), flush=True)
             historical_step_frames.append(step_df.copy())
 
     detailed_df = pd.DataFrame(detailed_records)
