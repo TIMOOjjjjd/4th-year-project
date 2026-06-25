@@ -4,7 +4,7 @@ This experiment reuses Experiment 3's confidence-weighted residual GraphSAGE
 pipeline. The only variable is the graph structure:
 
     no_graph: temporal baseline only, no residual GNN
-    od:       residual GraphSAGE on the rolling 30-day OD-flow graph
+    od:       residual GraphSAGE on the rolling 7-day OD-flow graph
     residual: residual GraphSAGE on historical base-model residual correlation
     geo:      residual GraphSAGE on the geographic graph
     random:   residual GraphSAGE on random graph baselines across fixed seeds
@@ -72,7 +72,7 @@ DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
-DEFAULT_OD_LOOKBACK_DAYS = 30
+DEFAULT_OD_LOOKBACK_DAYS = 7
 DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 
 
