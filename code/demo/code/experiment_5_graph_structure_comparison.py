@@ -73,7 +73,7 @@ DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
 DEFAULT_OD_LOOKBACK_DAYS = 30
-DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
+DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 
 
 @dataclass(frozen=True)
@@ -114,7 +114,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "same twelve windows as demo_test.py. If omitted with a custom "
+            "configured representative windows. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )
@@ -194,7 +194,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_RESIDUAL_WINDOW_HOURS,
         help=(
             "Historical base-residual window used to build each residual graph. "
-            "Default is 720 hours, matching 30 days."
+            "Default is 168 hours, matching 7 days."
         ),
     )
     parser.add_argument(

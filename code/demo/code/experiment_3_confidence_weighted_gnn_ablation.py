@@ -75,22 +75,13 @@ DEFAULT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RESULTS_DIR = BASE_DIR / "results"
 DEFAULT_GRAPH_TYPE = "residual"
-DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
+DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
 ROLLING_STEPS = 24
 DEFAULT_WINDOW_STARTS = (
     "2021-03-01 00:00",
-    "2021-03-29 00:00",
-    "2021-04-26 00:00",
-    "2021-05-24 00:00",
-    "2021-06-21 00:00",
     "2021-07-05 00:00",
-    "2021-07-19 00:00",
-    "2021-08-16 00:00",
-    "2021-09-13 00:00",
-    "2021-10-11 00:00",
-    "2021-11-08 00:00",
     "2021-12-06 00:00",
 )
 EXCLUDED_ZONES = [103, 104, 105, 46, 264, 265]
@@ -237,7 +228,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "same twelve windows as demo_test.py. If omitted with a custom "
+            "configured representative windows. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )

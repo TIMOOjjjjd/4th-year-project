@@ -73,7 +73,7 @@ from residual_graph_utils import (
 
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_GRAPH_TYPE = "residual"
-DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
+DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 EXPERIMENT_MODE = "learned_softmax"
 OUTPUT_STEM = "experiment_6_confidence_reliability_validation"
 CONFIDENCE_GROUP_ORDER = [
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "same twelve windows as demo_test.py. If omitted with a custom "
+            "configured representative windows. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )

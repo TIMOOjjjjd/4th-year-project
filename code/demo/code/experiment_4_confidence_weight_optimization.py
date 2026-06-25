@@ -81,7 +81,7 @@ COMPONENT_NAMES = ("prior", "stability", "history_consistency")
 FIXED_WEIGHTS = np.array([0.3, 0.4, 0.3], dtype=np.float32)
 DEFAULT_OPT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GRAPH_TYPE = "residual"
-DEFAULT_RESIDUAL_WINDOW_HOURS = 24 * 30
+DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 HISTORY_CONSISTENCY_TAU = 1.0
 
 MODE_SPECS = {
@@ -147,7 +147,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "same twelve windows as demo_test.py. If omitted with a custom "
+            "configured representative windows. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )
