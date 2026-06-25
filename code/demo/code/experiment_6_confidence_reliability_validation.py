@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "configured representative windows. If omitted with a custom "
+            "same twelve windows as demo_test.py. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )

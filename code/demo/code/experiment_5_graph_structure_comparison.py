@@ -1,15 +1,14 @@
-"""Experiment 5: compare OD, residual, geographic, random, and no-graph baselines.
+"""Experiment 5: compare OD, geographic, random, and no-graph baselines.
 
 This experiment reuses Experiment 3's confidence-weighted residual GraphSAGE
 pipeline. The only variable is the graph structure:
 
     no_graph: temporal baseline only, no residual GNN
-    od:       residual GraphSAGE on the rolling 7-day OD-flow graph
-    residual: residual GraphSAGE on historical base-model residual correlation
+    od:       residual GraphSAGE on the rolling 30-day OD-flow graph
     geo:      residual GraphSAGE on the geographic graph
     random:   residual GraphSAGE on random graph baselines across fixed seeds
 
-All graph variants use Experiment 3's learned-softmax confidence-weighted
+All graph-based variants use Experiment 3's learned-softmax confidence-weighted
 residual loss.
 For fairness, each rolling hour shares the same temporal predictions and the
 same location-based split across all graph structures. The GNN train/validation
@@ -36,7 +35,6 @@ from build_od_graph import (
     _load_zone_names,
     _retain_top_k,
 )
-from build_residual_graph import build_residual_correlation_graph
 from experiment_3_confidence_weighted_gnn_ablation import (
     BASE_DIR,
     DEFAULT_DATA_PATH,
@@ -72,8 +70,7 @@ DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
-DEFAULT_OD_LOOKBACK_DAYS = 7
-DEFAULT_RESIDUAL_WINDOW_HOURS = 168
+DEFAULT_OD_LOOKBACK_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -94,7 +91,7 @@ class LocationSplitSets:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run Experiment 5: OD vs residual vs geographic vs random vs no graph."
+        description="Run Experiment 5: OD vs geographic vs random vs no graph."
     )
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
@@ -114,7 +111,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional explicit 24-hour window starts. By default, uses the "
-            "configured representative windows. If omitted with a custom "
+            "same twelve windows as demo_test.py. If omitted with a custom "
             "--start-target, a single window is run for backward compatibility."
         ),
     )
@@ -140,8 +137,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--graph-types",
         nargs="*",
-        choices=["no_graph", "od", "residual", "geo", "random"],
-        default=["no_graph", "od", "residual", "geo", "random"],
+        choices=["no_graph", "od", "geo", "random"],
+        default=["no_graph", "od", "geo", "random"],
         help="Subset and order of graph variants to evaluate.",
     )
     parser.add_argument(
@@ -187,43 +184,6 @@ def parse_args() -> argparse.Namespace:
         "--od-include-self",
         action="store_true",
         help="Keep trips where pickup and dropoff map to the same zone in rolling OD graphs.",
-    )
-    parser.add_argument(
-        "--residual-window-hours",
-        type=int,
-        default=DEFAULT_RESIDUAL_WINDOW_HOURS,
-        help=(
-            "Historical base-residual window used to build each residual graph. "
-            "Default is 168 hours, matching 7 days."
-        ),
-    )
-    parser.add_argument(
-        "--residual-top-k",
-        type=int,
-        default=10,
-        help="Keep the top K residual-correlated destination zones per origin.",
-    )
-    parser.add_argument(
-        "--residual-min-corr",
-        type=float,
-        default=0.0,
-        help="Drop residual graph edges whose absolute Pearson correlation is below this.",
-    )
-    parser.add_argument(
-        "--residual-use-signed-corr",
-        action="store_true",
-        help="Use signed Pearson correlation as edge weight; ranking still uses abs(corr).",
-    )
-    parser.add_argument(
-        "--residual-symmetrize",
-        action="store_true",
-        help="Symmetrize the residual graph after top-k selection.",
-    )
-    parser.add_argument(
-        "--residual-graph-dir",
-        type=Path,
-        default=None,
-        help="Directory for generated residual graph CSVs. Defaults to results/residual_graphs.",
     )
     parser.add_argument(
         "--random-seeds",
@@ -287,12 +247,6 @@ def parse_args() -> argparse.Namespace:
         parser.error("--od-top-k must be >= 0.")
     if args.od_min_flow < 1:
         parser.error("--od-min-flow must be >= 1.")
-    if args.residual_window_hours <= 0:
-        parser.error("--residual-window-hours must be > 0.")
-    if args.residual_top_k < 0:
-        parser.error("--residual-top-k must be >= 0.")
-    if args.residual_min_corr < 0.0:
-        parser.error("--residual-min-corr must be >= 0.")
     if "random" in args.graph_types and not args.random_seeds:
         parser.error("--random-seeds requires at least one seed when random is selected.")
     if args.random_top_k < 0:
@@ -331,15 +285,6 @@ def build_graph_specs(args: argparse.Namespace) -> Tuple[Dict[str, GraphSpec], L
             model_name=od_model_name,
             description=od_description,
             edge_csv=args.od_edge_csv,
-        ),
-        "residual": GraphSpec(
-            key="residual",
-            model_name="GNN + Residual Graph",
-            description=(
-                "Experiment 3 learned-softmax GraphSAGE on historical "
-                "base-model residual correlation graph"
-            ),
-            edge_csv=None,
         ),
         "geo": GraphSpec(
             key="geo",
@@ -409,20 +354,8 @@ def uses_rolling_od_graph(args: argparse.Namespace, graph_order: Sequence[str]) 
     return "od" in graph_order and args.od_lookback_days > 0
 
 
-def uses_residual_graph(graph_order: Sequence[str]) -> bool:
-    return "residual" in graph_order
-
-
 def od_graph_dir(args: argparse.Namespace) -> Path:
     return args.od_graph_dir if args.od_graph_dir is not None else args.results_dir / "od_graphs"
-
-
-def residual_graph_dir(args: argparse.Namespace) -> Path:
-    return (
-        args.residual_graph_dir
-        if args.residual_graph_dir is not None
-        else args.results_dir / "residual_graphs"
-    )
 
 
 def od_graph_path(args: argparse.Namespace, target_hour: pd.Timestamp) -> Path:
@@ -432,40 +365,9 @@ def od_graph_path(args: argparse.Namespace, target_hour: pd.Timestamp) -> Path:
     )
 
 
-def residual_graph_path(args: argparse.Namespace, target_hour: pd.Timestamp) -> Path:
-    timestamp = pd.Timestamp(target_hour).strftime("%Y%m%d_%H%M%S")
-    return residual_graph_dir(args) / f"edge_weight_matrix_residual_until_{timestamp}.csv"
-
-
-def residual_graph_summary_path(args: argparse.Namespace) -> Path:
-    return residual_graph_dir(args) / "residual_graph_summary.csv"
-
-
 def load_od_zone_names(args: argparse.Namespace) -> List[str]:
     template_path = args.geo_edge_csv if args.geo_edge_csv.exists() else None
     return _load_zone_names(args.lookup, template_path=template_path)
-
-
-def build_zone_only_graph_context(zone_names: List[str], lookup_df: pd.DataFrame) -> GraphContext:
-    lookup_by_zone = lookup_df.drop_duplicates(subset="Zone")
-    zone_to_location = {
-        str(row.Zone): int(row.LocationID)
-        for row in lookup_by_zone.itertuples()
-        if pd.notna(row.LocationID)
-    }
-    location_to_zone = {
-        int(row.LocationID): str(row.Zone)
-        for row in lookup_df.itertuples()
-        if pd.notna(row.LocationID)
-    }
-    return GraphContext(
-        edge_index=torch.empty((2, 0), dtype=torch.long),
-        edge_weight=torch.empty((0,), dtype=torch.float32),
-        zone_names=zone_names,
-        zone_idx_map={zone_name: idx for idx, zone_name in enumerate(zone_names)},
-        location_to_zone=location_to_zone,
-        zone_to_location=zone_to_location,
-    )
 
 
 def aggregate_od_flows_from_frame(
@@ -557,199 +459,6 @@ def build_rolling_od_graph_context(
         f"from {kept_rows} retained trips with {edge_count} nonzero edges."
     )
     return build_graph_context(edge_csv=output_path, lookup_df=lookup_df)
-
-
-def cache_baseline_predictions(
-    prediction_cache: Dict[Tuple[int, pd.Timestamp], float],
-    baseline_df: pd.DataFrame,
-) -> None:
-    for row in baseline_df.itertuples():
-        target_hour = pd.Timestamp(row.target_hour)
-        prediction_cache[(int(row.PULocationID), target_hour)] = float(row.base_pred)
-
-
-def get_cached_base_prediction_sequence(
-    prediction_cache: Dict[Tuple[int, pd.Timestamp], float],
-    manager: MultiScaleModelManager,
-    df: pd.DataFrame,
-    zone_id: int,
-    target_hours: Sequence[pd.Timestamp],
-) -> Tuple[List[float], int]:
-    """Predict temporal/base demand for many hours while loading the model once."""
-
-    zone_int = int(zone_id)
-    normalized_hours = [pd.Timestamp(hour) for hour in target_hours]
-    missing_hours = [
-        hour for hour in normalized_hours if (zone_int, hour) not in prediction_cache
-    ]
-    failures = 0
-
-    if missing_hours:
-        print(
-            f"    residual base prediction cache zone={zone_int} "
-            f"missing_hours={len(missing_hours)}",
-            flush=True,
-        )
-        model, scaler = manager._load(zone_int)
-        model.eval()
-        for hour in missing_hours:
-            key = (zone_int, hour)
-            try:
-                context_end = hour - manager._forecast_delta
-                hourly = manager._prepare_zone_series(
-                    df=df,
-                    zone_id=zone_int,
-                    end_inclusive=context_end,
-                )
-                x_last = manager._build_inference_window(
-                    hourly=hourly,
-                    scaler=scaler,
-                    context_end=context_end,
-                )
-                with torch.no_grad():
-                    prediction_scaled = model(x_last).cpu().numpy()
-                prediction = manager._inverse_values(prediction_scaled, scaler)[0, 0]
-                prediction_cache[key] = float(max(0.0, prediction))
-            except Exception:  # noqa: BLE001
-                failures += 1
-                prediction_cache[key] = np.nan
-
-    values = [prediction_cache[(zone_int, hour)] for hour in normalized_hours]
-    return values, failures
-
-
-def build_residual_history_frames(
-    args: argparse.Namespace,
-    df: pd.DataFrame,
-    manager: MultiScaleModelManager,
-    target_hour: pd.Timestamp,
-    zones: Sequence[int],
-    zone_hourly_counts: pd.Series,
-    graph_context: GraphContext,
-    prediction_cache: Dict[Tuple[int, pd.Timestamp], float],
-) -> Tuple[pd.DataFrame, pd.DataFrame, int]:
-    """Build historical true/base-pred matrices for residual graph construction.
-
-    Rows are historical hours strictly before target_hour. Predictions are from
-    the temporal/base model only; no GNN-refined predictions are used.
-    """
-
-    context_end = pd.Timestamp(target_hour) - manager._forecast_delta
-    # A checkpoint trained through target_hour - 1 is allowed here because the
-    # graph is built for target_hour and uses only information already historical
-    # at that point. The target_hour true value itself is never included.
-    total_zones = len(zones)
-    for zone_pos, zone_id in enumerate(zones, start=1):
-        print(f"[{target_hour}] residual meta check zone {zone_id}", flush=True)
-        trained_until = manager._load_meta(int(zone_id))
-        if trained_until is not None and trained_until > context_end:
-            raise RuntimeError(
-                f"Checkpoint for zone {zone_id} was trained through {trained_until}, "
-                f"which is after residual graph context_end={context_end}."
-            )
-
-    window_start = pd.Timestamp(target_hour) - pd.Timedelta(hours=args.residual_window_hours)
-    history_hours = pd.date_range(
-        start=window_start,
-        periods=args.residual_window_hours,
-        freq="h",
-    )
-    zone_names = list(graph_context.zone_names)
-    y_true = pd.DataFrame(0.0, index=history_hours, columns=zone_names)
-    y_pred = pd.DataFrame(np.nan, index=history_hours, columns=zone_names)
-
-    prediction_failures = 0
-    for zone_pos, zone_id in enumerate(zones, start=1):
-        zone_int = int(zone_id)
-        zone_name = graph_context.location_to_zone.get(zone_int)
-        if zone_name is None or zone_name not in y_true.columns:
-            continue
-
-        try:
-            true_series = zone_hourly_counts.loc[zone_int]
-            y_true[zone_name] = true_series.reindex(history_hours, fill_value=0.0).astype(float)
-        except KeyError:
-            y_true[zone_name] = 0.0
-
-        missing_count = sum(
-            1 for hour in history_hours if (zone_int, pd.Timestamp(hour)) not in prediction_cache
-        )
-        print(
-            f"[{target_hour}] residual history zone {zone_pos}/{total_zones}: "
-            f"{zone_int} missing_base_predictions={missing_count}",
-            flush=True,
-        )
-        predictions, failures = get_cached_base_prediction_sequence(
-            prediction_cache=prediction_cache,
-            manager=manager,
-            df=df,
-            zone_id=zone_int,
-            target_hours=history_hours,
-        )
-        prediction_failures += failures
-        y_pred[zone_name] = predictions
-
-    return y_true, y_pred, prediction_failures
-
-
-def build_residual_graph_context(
-    args: argparse.Namespace,
-    df: pd.DataFrame,
-    manager: MultiScaleModelManager,
-    lookup_df: pd.DataFrame,
-    target_hour: pd.Timestamp,
-    zones: Sequence[int],
-    zone_hourly_counts: pd.Series,
-    graph_context: GraphContext,
-    prediction_cache: Dict[Tuple[int, pd.Timestamp], float],
-) -> Tuple[GraphContext, Dict[str, object]]:
-    # The residual graph is aligned with residual refinement: it connects zones
-    # whose historical temporal-model errors co-move before the target hour.
-    y_true, y_pred, prediction_failures = build_residual_history_frames(
-        args=args,
-        df=df,
-        manager=manager,
-        target_hour=target_hour,
-        zones=zones,
-        zone_hourly_counts=zone_hourly_counts,
-        graph_context=graph_context,
-        prediction_cache=prediction_cache,
-    )
-
-    output_path = residual_graph_path(args=args, target_hour=target_hour)
-    matrix, summary = build_residual_correlation_graph(
-        y_true=y_true,
-        y_pred=y_pred,
-        timestamps=y_true.index,
-        current_t=target_hour,
-        window_hours=args.residual_window_hours,
-        top_k=args.residual_top_k,
-        use_abs_corr=not args.residual_use_signed_corr,
-        min_corr=args.residual_min_corr,
-        symmetrize=args.residual_symmetrize,
-        save_path=output_path,
-        zone_names=y_true.columns.tolist(),
-        random_seed=args.seed,
-        return_summary=True,
-        verbose=True,
-    )
-    del matrix
-
-    window_start = pd.Timestamp(target_hour) - pd.Timedelta(hours=args.residual_window_hours)
-    summary.update(
-        {
-            "target_hour": pd.Timestamp(target_hour),
-            "window_start": window_start,
-            "window_end_exclusive": pd.Timestamp(target_hour),
-            "prediction_failures": int(prediction_failures),
-            "graph_csv": str(output_path),
-        }
-    )
-    print(
-        f"Generated residual graph [{window_start}, {target_hour}) at {output_path} "
-        f"with {summary['num_edges']} nonzero edges."
-    )
-    return build_graph_context(edge_csv=output_path, lookup_df=lookup_df), summary
 
 
 def load_taxi_data(
@@ -1159,7 +868,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     specs, requested_graphs = build_graph_specs(args)
     rolling_od = uses_rolling_od_graph(args=args, graph_order=requested_graphs)
-    residual_graph_enabled = uses_residual_graph(graph_order=requested_graphs)
     generate_random_graphs(args=args, specs=specs, graph_order=requested_graphs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("CUDA available:", torch.cuda.is_available())
@@ -1172,21 +880,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             "Rolling OD graph window: "
             f"{args.od_lookback_days} days before each target hour"
         )
-    if residual_graph_enabled:
-        print(
-            "Residual graph window: "
-            f"{args.residual_window_hours} hours before each target hour"
-        )
-    if rolling_od and residual_graph_enabled:
-        od_window_hours = int(args.od_lookback_days * 24)
-        if od_window_hours == int(args.residual_window_hours):
-            print(f"OD/residual graph history windows match: {od_window_hours} hours.")
-        else:
-            print(
-                "WARNING: OD/residual graph history windows differ: "
-                f"OD={od_window_hours} hours, "
-                f"residual={args.residual_window_hours} hours."
-            )
 
     df = load_taxi_data(
         data_path=args.data,
@@ -1222,14 +915,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             target_hour=first_target_hour,
         )
         graphs["od"] = rolling_od_cache[first_target_hour]
-    residual_base_context: Optional[GraphContext] = None
-    if residual_graph_enabled:
-        residual_zone_names = load_od_zone_names(args)
-        residual_base_context = build_zone_only_graph_context(
-            zone_names=residual_zone_names,
-            lookup_df=lookup_df,
-        )
-        graphs["residual"] = residual_base_context
     zones = select_shared_zones(df=df, graphs=graphs, max_zones=args.max_zones)
     zone_hourly_counts = build_zone_hourly_counts(df)
 
@@ -1245,8 +930,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
 
     detailed_frames: List[pd.DataFrame] = []
     hourly_records: List[Dict[str, object]] = []
-    residual_prediction_cache: Dict[Tuple[int, pd.Timestamp], float] = {}
-    residual_summary_records: List[Dict[str, object]] = []
 
     for window_idx, window_start in enumerate(window_starts, start=1):
         # Keep GNN residual-training snapshots local to this evaluation window.
@@ -1287,34 +970,6 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 zone_hourly_counts=zone_hourly_counts,
             )
             print(f"[{target_hour}] done TCN baseline", flush=True)
-            if residual_graph_enabled:
-                print(f"[{target_hour}] start residual graph", flush=True)
-                cache_baseline_predictions(
-                    prediction_cache=residual_prediction_cache,
-                    baseline_df=baseline_df,
-                )
-                if residual_base_context is None:
-                    raise RuntimeError("Residual graph context was not initialized.")
-                residual_context, residual_summary = build_residual_graph_context(
-                    args=args,
-                    df=df,
-                    manager=manager,
-                    lookup_df=lookup_df,
-                    target_hour=target_hour,
-                    zones=zones,
-                    zone_hourly_counts=zone_hourly_counts,
-                    graph_context=residual_base_context,
-                    prediction_cache=residual_prediction_cache,
-                )
-                residual_summary["window_id"] = window_idx
-                residual_summary["window_start"] = window_start
-                residual_summary["window_step"] = step
-                graphs["residual"] = residual_context
-                residual_summary_records.append(residual_summary)
-                summary_log_path = residual_graph_summary_path(args)
-                summary_log_path.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame(residual_summary_records).to_csv(summary_log_path, index=False)
-                print(f"[{target_hour}] done residual graph", flush=True)
 
             print(f"[{target_hour}] start confidence and split prep", flush=True)
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
