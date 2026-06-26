@@ -69,10 +69,18 @@ from residual_graph_utils import (
     build_dynamic_residual_graph_context,
     residual_graph_summary_path,
 )
+from rolling_od_graph_utils import (
+    add_rolling_od_args,
+    build_rolling_od_graph_context,
+    load_od_location_lookup,
+    load_od_zone_names,
+    uses_rolling_od_graph,
+    validate_rolling_od_args,
+)
 
 
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
-DEFAULT_GRAPH_TYPE = "residual"
+DEFAULT_GRAPH_TYPE = "od"
 DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 EXPERIMENT_MODE = "learned_softmax"
 OUTPUT_STEM = "experiment_6_confidence_reliability_validation"
@@ -90,11 +98,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
     parser.add_argument("--edge-csv", type=Path, default=DEFAULT_EDGE_WEIGHT_MATRIX)
+    add_rolling_od_args(parser)
     parser.add_argument(
         "--graph-type",
         choices=["residual", "od"],
         default=DEFAULT_GRAPH_TYPE,
-        help="Graph used by residual GraphSAGE. Default builds dynamic residual graphs.",
+        help=(
+            "Graph used by residual GraphSAGE. Default uses rolling OD graphs; "
+            "set --od-lookback-days 0 to use the static --edge-csv matrix."
+        ),
     )
     parser.add_argument(
         "--residual-window-hours",
@@ -182,6 +194,7 @@ def parse_args() -> argparse.Namespace:
         parser.error("--residual-top-k must be >= 0.")
     if args.residual_min_corr < 0:
         parser.error("--residual-min-corr must be >= 0.")
+    validate_rolling_od_args(parser, args)
     return args
 
 
@@ -400,12 +413,19 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
     print("Confidence mode:", EXPERIMENT_MODE)
+    rolling_od = uses_rolling_od_graph(args)
+    if rolling_od:
+        print(
+            "Rolling OD graph window: "
+            f"{args.od_lookback_days} days before each target hour"
+        )
 
     df, lookup_df, graph_template = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
         excluded_zones=args.excluded_zones,
+        include_dropoff=rolling_od,
     )
     window_starts = resolve_window_starts(args)
     validate_windows(df, window_starts, args.rolling_steps)
@@ -413,6 +433,23 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
         "Window starts:",
         ", ".join(str(start) for start in window_starts),
     )
+    rolling_od_cache: Dict[pd.Timestamp, object] = {}
+    od_zone_names: List[str] = []
+    od_location_to_zone: Dict[int, str] = {}
+    if rolling_od:
+        od_zone_names = load_od_zone_names(args)
+        od_location_to_zone = load_od_location_lookup(args)
+        first_target_hour = window_starts[0]
+        rolling_od_cache[first_target_hour] = build_rolling_od_graph_context(
+            args=args,
+            df=df,
+            lookup_df=lookup_df,
+            zone_names=od_zone_names,
+            location_to_zone=od_location_to_zone,
+            target_hour=first_target_hour,
+            build_graph_context_fn=build_graph_context,
+        )
+        graph_template = rolling_od_cache[first_target_hour]
     zones = select_zones(df, graph_template, args.max_zones)
     print("Graph-compatible zones selected:", len(zones))
 
@@ -446,6 +483,20 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             )
 
             set_random_seed(args.seed + global_step)
+            if rolling_od:
+                if target_hour not in rolling_od_cache:
+                    print(f"[{target_hour}] start rolling OD graph", flush=True)
+                    rolling_od_cache[target_hour] = build_rolling_od_graph_context(
+                        args=args,
+                        df=df,
+                        lookup_df=lookup_df,
+                        zone_names=od_zone_names,
+                        location_to_zone=od_location_to_zone,
+                        target_hour=target_hour,
+                        build_graph_context_fn=build_graph_context,
+                    )
+                    print(f"[{target_hour}] done rolling OD graph", flush=True)
+                graph_template = rolling_od_cache[target_hour]
             print(f"[{target_hour}] start TCN baseline", flush=True)
             baseline_df = run_multiscale_temporal_baseline(
                 df=df,

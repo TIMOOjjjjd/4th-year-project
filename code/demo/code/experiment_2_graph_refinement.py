@@ -50,6 +50,14 @@ from residual_graph_utils import (
     build_dynamic_residual_graph_context,
     residual_graph_summary_path,
 )
+from rolling_od_graph_utils import (
+    add_rolling_od_args,
+    build_rolling_od_graph_context,
+    load_od_location_lookup,
+    load_od_zone_names,
+    uses_rolling_od_graph,
+    validate_rolling_od_args,
+)
 
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -66,7 +74,7 @@ DEFAULT_LOOKUP_PATH = BASE_DIR / "taxi-zone-lookup.csv"
 DEFAULT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RESULTS_DIR = BASE_DIR / "results"
-DEFAULT_GRAPH_TYPE = "residual"
+DEFAULT_GRAPH_TYPE = "od"
 DEFAULT_RESIDUAL_WINDOW_HOURS = 168
 
 START_TARGET = pd.Timestamp("2021-07-05 00:00")
@@ -185,11 +193,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--lookup", type=Path, default=DEFAULT_LOOKUP_PATH)
     parser.add_argument("--edge-csv", type=Path, default=DEFAULT_EDGE_WEIGHT_MATRIX)
+    add_rolling_od_args(parser)
     parser.add_argument(
         "--graph-type",
         choices=["residual", "od"],
         default=DEFAULT_GRAPH_TYPE,
-        help="Graph used by residual GraphSAGE. Default builds dynamic residual graphs.",
+        help=(
+            "Graph used by residual GraphSAGE. Default uses rolling OD graphs; "
+            "set --od-lookback-days 0 to use the static --edge-csv matrix."
+        ),
     )
     parser.add_argument(
         "--residual-window-hours",
@@ -254,6 +266,7 @@ def parse_args() -> argparse.Namespace:
         parser.error("--residual-top-k must be >= 0.")
     if args.residual_min_corr < 0:
         parser.error("--residual-min-corr must be >= 0.")
+    validate_rolling_od_args(parser, args)
     return args
 
 
@@ -306,10 +319,14 @@ def load_required_data(
     lookup_path: Path,
     edge_csv: Path,
     excluded_zones: Sequence[int],
+    include_dropoff: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, GraphContext]:
     """Load taxi trips, zone lookup, and the OD-flow graph."""
 
-    df = pd.read_parquet(data_path, columns=["pickup_datetime", "PULocationID"])
+    columns = ["pickup_datetime", "PULocationID"]
+    if include_dropoff:
+        columns.append("DOLocationID")
+    df = pd.read_parquet(data_path, columns=columns)
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"])
     df["datetime"] = df["pickup_datetime"].dt.floor("h")
     df = df[~df["PULocationID"].isin(excluded_zones)].copy()
@@ -1261,12 +1278,19 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("CUDA available:", torch.cuda.is_available())
     print("Using device:", device)
     print("Checkpoint dir:", args.checkpoint_dir)
+    rolling_od = uses_rolling_od_graph(args)
+    if rolling_od:
+        print(
+            "Rolling OD graph window: "
+            f"{args.od_lookback_days} days before each target hour"
+        )
 
     df, lookup_df, graph_template = load_required_data(
         data_path=args.data,
         lookup_path=args.lookup,
         edge_csv=args.edge_csv,
         excluded_zones=args.excluded_zones,
+        include_dropoff=rolling_od,
     )
     window_starts = resolve_window_starts(args)
     validate_windows(df, window_starts, args.rolling_steps)
@@ -1274,6 +1298,23 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
         "Window starts:",
         ", ".join(str(start) for start in window_starts),
     )
+    rolling_od_cache: Dict[pd.Timestamp, GraphContext] = {}
+    od_zone_names: List[str] = []
+    od_location_to_zone: Dict[int, str] = {}
+    if rolling_od:
+        od_zone_names = load_od_zone_names(args)
+        od_location_to_zone = load_od_location_lookup(args)
+        first_target_hour = window_starts[0]
+        rolling_od_cache[first_target_hour] = build_rolling_od_graph_context(
+            args=args,
+            df=df,
+            lookup_df=lookup_df,
+            zone_names=od_zone_names,
+            location_to_zone=od_location_to_zone,
+            target_hour=first_target_hour,
+            build_graph_context_fn=build_graph_context,
+        )
+        graph_template = rolling_od_cache[first_target_hour]
     zones = select_zones(df, args.max_zones)
     zone_hourly_counts = build_zone_hourly_counts(df)
 
@@ -1308,6 +1349,20 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             )
 
             set_random_seed(args.seed + global_step)
+            if rolling_od:
+                if target_hour not in rolling_od_cache:
+                    print(f"[{target_hour}] start rolling OD graph", flush=True)
+                    rolling_od_cache[target_hour] = build_rolling_od_graph_context(
+                        args=args,
+                        df=df,
+                        lookup_df=lookup_df,
+                        zone_names=od_zone_names,
+                        location_to_zone=od_location_to_zone,
+                        target_hour=target_hour,
+                        build_graph_context_fn=build_graph_context,
+                    )
+                    print(f"[{target_hour}] done rolling OD graph", flush=True)
+                graph_template = rolling_od_cache[target_hour]
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,

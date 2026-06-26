@@ -63,6 +63,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     set_random_seed,
     validate_windows,
 )
+from rolling_od_graph_utils import DEFAULT_OD_LOOKBACK_DAYS as SHARED_DEFAULT_OD_LOOKBACK_DAYS
 
 
 GRAPH_CONFIDENCE_MODE = "learned_softmax"
@@ -70,7 +71,7 @@ DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
-DEFAULT_OD_LOOKBACK_DAYS = 30
+DEFAULT_OD_LOOKBACK_DAYS = SHARED_DEFAULT_OD_LOOKBACK_DAYS
 
 
 @dataclass(frozen=True)
