@@ -62,7 +62,7 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     load_required_data,
     make_location_split_sets,
     masks_from_location_splits,
-    remap_edges_to_valid_nodes,
+    remap_edges_and_weights_to_valid_nodes,
     run_multiscale_temporal_baseline,
     resolve_window_starts,
     select_zones,
@@ -319,7 +319,11 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
     if valid_indices.numel() < 3:
         raise ValueError("Not enough valid graph nodes to train/evaluate residual GNN.")
 
-    edge_index = remap_edges_to_valid_nodes(graph.edge_index, valid_indices)
+    edge_index, edge_weight = remap_edges_and_weights_to_valid_nodes(
+        graph.edge_index,
+        valid_indices,
+        graph.edge_weight,
+    )
     node_pred = node_pred[valid_indices]
     node_label = node_label[valid_indices]
     prior = prior[valid_indices]
@@ -348,6 +352,7 @@ def build_gnn_features(step_df: pd.DataFrame, graph: GraphContext) -> Data:
         stability_score=stability,
         history_consistency_score=history_consistency,
         full_confidence=full_confidence,
+        edge_weight=edge_weight,
     )
 
 
@@ -379,6 +384,7 @@ def build_historical_gnn_training_data(
     history_parts: List[torch.Tensor] = []
     confidence_parts: List[torch.Tensor] = []
     edge_parts: List[torch.Tensor] = []
+    edge_weight_parts: List[torch.Tensor] = []
 
     offset = 0
     for snapshot in snapshots:
@@ -394,6 +400,7 @@ def build_historical_gnn_training_data(
 
         if snapshot.edge_index.numel() > 0:
             edge_parts.append(snapshot.edge_index + offset)
+            edge_weight_parts.append(snapshot.edge_weight)
         offset += int(snapshot.num_nodes)
 
     edge_index = (
@@ -412,6 +419,11 @@ def build_historical_gnn_training_data(
         stability_score=torch.cat(stability_parts, dim=0),
         history_consistency_score=torch.cat(history_parts, dim=0),
         full_confidence=torch.cat(confidence_parts, dim=0),
+        edge_weight=(
+            torch.cat(edge_weight_parts, dim=0)
+            if edge_weight_parts
+            else torch.empty((0,), dtype=torch.float32)
+        ),
     )
 
 

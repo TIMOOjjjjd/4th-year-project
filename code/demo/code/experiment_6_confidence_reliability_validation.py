@@ -546,7 +546,11 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             step_df["window_id"] = window_idx
             step_df["window_start"] = window_start
             step_df["window_step"] = step
-            inference_data = build_gnn_features(step_df=step_df, graph=graph)
+            inference_data = build_gnn_features(
+                step_df=step_df,
+                graph=graph,
+                use_edge_weight=True,
+            )
             split_sets = make_location_split_sets(
                 location_ids=inference_data.location_id.cpu().numpy().astype(int),
                 seed=args.seed + global_step,
@@ -563,6 +567,7 @@ def run_prediction_generation(args: argparse.Namespace) -> pd.DataFrame:
             train_data = build_historical_gnn_training_data(
                 history_frames=history_frames,
                 graph=graph,
+                use_edge_weight=True,
             )
             print(
                 f"[{target_hour}] done confidence and split prep; "
