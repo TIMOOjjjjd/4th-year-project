@@ -1,15 +1,14 @@
 """Experiment 5: compare OD, geographic, random, and no-graph baselines.
 
-This experiment reuses Experiment 3's confidence-weighted residual GraphSAGE
-pipeline. The only variable is the graph structure:
+This experiment reuses Experiment 3's residual GraphSAGE pipeline with
+unweighted residual loss. The only variable is the graph structure:
 
     no_graph: temporal baseline only, no residual GNN
     od:       residual GraphSAGE on the rolling 30-day OD-flow graph
     geo:      residual GraphSAGE on the geographic graph
     random:   residual GraphSAGE on random graph baselines across fixed seeds
 
-All graph-based variants use Experiment 3's learned-softmax confidence-weighted
-residual loss.
+All graph-based variants use the same unweighted residual loss.
 For fairness, each rolling hour shares the same temporal predictions and the
 same location-based split across all graph structures. The GNN train/validation
 loss is computed only on historical residual snapshots before the target hour;
@@ -56,7 +55,6 @@ from experiment_3_confidence_weighted_gnn_ablation import (
     compute_confidence_components,
     compute_prior_scores_from_zone_hourly_counts,
     evaluate_refined_predictions,
-    filter_history_frames_before,
     resolve_window_starts,
     run_multiscale_temporal_baseline,
     run_single_ablation,
@@ -66,10 +64,15 @@ from experiment_3_confidence_weighted_gnn_ablation import (
 from rolling_od_graph_utils import DEFAULT_OD_LOOKBACK_DAYS as SHARED_DEFAULT_OD_LOOKBACK_DAYS
 
 
-GRAPH_CONFIDENCE_MODE = "learned_softmax"
+GRAPH_CONFIDENCE_MODE = "none"
 DEFAULT_OD_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GEO_EDGE_MATRIX = BASE_DIR / "edge_weight_matrix_geo.csv"
 DEFAULT_CHECKPOINT_DIR = BASE_DIR / "checkpoints_tcn_shared_v1"
+DEFAULT_EX5_RESULTS_DIR = (
+    DEFAULT_RESULTS_DIR
+    / "experiment_5_graph_structure_comparison_no_confidence_peak_split_edge_weight"
+)
+DEFAULT_MORNING_PEAK_HOURS = [6, 7, 8, 9]
 DEFAULT_RANDOM_SEEDS = [1, 2, 3, 4, 5]
 DEFAULT_OD_LOOKBACK_DAYS = SHARED_DEFAULT_OD_LOOKBACK_DAYS
 
@@ -90,6 +93,78 @@ class LocationSplitSets:
     test: Set[int]
 
 
+def add_residual_training_split_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--residual-training-split",
+        choices=["all", "peak_non_peak"],
+        default="peak_non_peak",
+        help=(
+            "Historical residual snapshots used for each GNN. 'peak_non_peak' "
+            "trains peak target hours only on prior peak snapshots and non-peak "
+            "target hours only on prior non-peak snapshots."
+        ),
+    )
+
+
+def history_frame_is_peak(frame: pd.DataFrame, peak_hours: Set[int]) -> bool:
+    if frame.empty or "target_hour" not in frame.columns:
+        return False
+    hours = pd.to_datetime(frame["target_hour"]).dt.hour.dropna().unique()
+    return bool(len(hours) > 0 and int(hours[0]) in peak_hours)
+
+
+def filter_history_frames_before(
+    history_frames: Sequence[pd.DataFrame],
+    target_hour: pd.Timestamp,
+) -> List[pd.DataFrame]:
+    filtered: List[pd.DataFrame] = []
+    target_ts = pd.Timestamp(target_hour)
+    for frame in history_frames:
+        if frame.empty:
+            continue
+        if "target_hour" not in frame.columns:
+            filtered.append(frame)
+            continue
+        frame_hours = pd.to_datetime(frame["target_hour"])
+        if frame_hours.max() < target_ts:
+            filtered.append(frame)
+    return filtered
+
+
+def select_residual_training_history(
+    history_frames: Sequence[pd.DataFrame],
+    target_hour: pd.Timestamp,
+    peak_hours: Set[int],
+    split_mode: str,
+) -> Tuple[List[pd.DataFrame], Dict[str, object]]:
+    prior_frames = filter_history_frames_before(history_frames, target_hour)
+    peak_frames = [frame for frame in prior_frames if history_frame_is_peak(frame, peak_hours)]
+    non_peak_frames = [
+        frame for frame in prior_frames if not history_frame_is_peak(frame, peak_hours)
+    ]
+
+    target_is_peak = int(pd.Timestamp(target_hour).hour) in peak_hours
+    if split_mode == "peak_non_peak":
+        selected_frames = peak_frames if target_is_peak else non_peak_frames
+        partition = "peak" if target_is_peak else "non_peak"
+    elif split_mode == "all":
+        selected_frames = prior_frames
+        partition = "all"
+    else:
+        raise ValueError(f"Unsupported residual training split: {split_mode}")
+
+    diagnostics = {
+        "residual_training_split": split_mode,
+        "target_period": "peak" if target_is_peak else "non_peak",
+        "training_history_partition": partition,
+        "history_snapshots": len(selected_frames),
+        "all_history_snapshots": len(prior_frames),
+        "peak_history_snapshots": len(peak_frames),
+        "non_peak_history_snapshots": len(non_peak_frames),
+    }
+    return selected_frames, diagnostics
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Experiment 5: OD vs geographic vs random vs no graph."
@@ -104,7 +179,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--geo-edge-csv", type=Path, default=DEFAULT_GEO_EDGE_MATRIX)
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)
-    parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
+    parser.add_argument("--results-dir", type=Path, default=DEFAULT_EX5_RESULTS_DIR)
     parser.add_argument("--start-target", type=pd.Timestamp, default=START_TARGET)
     parser.add_argument(
         "--window-starts",
@@ -118,6 +193,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--rolling-steps", type=int, default=ROLLING_STEPS)
     parser.add_argument("--excluded-zones", type=int, nargs="*", default=EXCLUDED_ZONES)
+    parser.add_argument(
+        "--morning-peak-hours",
+        type=int,
+        nargs="*",
+        default=DEFAULT_MORNING_PEAK_HOURS,
+    )
     parser.add_argument("--mc-samples", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-ratio", type=float, default=0.6)
@@ -129,12 +210,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gnn-patience", type=int, default=40)
     parser.add_argument(
         "--use-edge-weight",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Use nonzero CSV values as weighted GraphSAGE aggregation weights. "
-            "By default only the graph topology is compared."
+            "Enabled by default to match Experiment 2; pass --no-use-edge-weight "
+            "to compare topology only."
         ),
     )
+    add_residual_training_split_arg(parser)
     parser.add_argument(
         "--graph-types",
         nargs="*",
@@ -248,6 +332,11 @@ def parse_args() -> argparse.Namespace:
         parser.error("--od-top-k must be >= 0.")
     if args.od_min_flow < 1:
         parser.error("--od-min-flow must be >= 1.")
+    if not args.morning_peak_hours:
+        parser.error("--morning-peak-hours must contain at least one hour.")
+    invalid_peak_hours = [hour for hour in args.morning_peak_hours if hour < 0 or hour > 23]
+    if invalid_peak_hours:
+        parser.error(f"Invalid morning peak hour(s): {invalid_peak_hours}")
     if "random" in args.graph_types and not args.random_seeds:
         parser.error("--random-seeds requires at least one seed when random is selected.")
     if args.random_top_k < 0:
@@ -269,10 +358,10 @@ def build_graph_specs(args: argparse.Namespace) -> Tuple[Dict[str, GraphSpec], L
         else "OD Graph"
     )
     od_description = (
-        "Experiment 3 learned-softmax GraphSAGE on rolling "
+        "Unweighted residual GraphSAGE on rolling "
         f"{args.od_lookback_days}-day OD-flow graphs"
         if args.od_lookback_days > 0
-        else "Experiment 3 learned-softmax GraphSAGE on a static OD-flow graph"
+        else "Unweighted residual GraphSAGE on a static OD-flow graph"
     )
     base_specs = {
         "no_graph": GraphSpec(
@@ -290,7 +379,7 @@ def build_graph_specs(args: argparse.Namespace) -> Tuple[Dict[str, GraphSpec], L
         "geo": GraphSpec(
             key="geo",
             model_name="Geographic Graph",
-            description="Experiment 3 learned-softmax GraphSAGE on geographic graph",
+            description="Unweighted residual GraphSAGE on geographic graph",
             edge_csv=args.geo_edge_csv,
         ),
     }
@@ -308,8 +397,8 @@ def build_graph_specs(args: argparse.Namespace) -> Tuple[Dict[str, GraphSpec], L
                 key=key,
                 model_name=f"Random Graph seed={int(seed)}",
                 description=(
-                    "Experiment 3 learned-softmax GraphSAGE on a generated "
-                    f"random graph, seed={int(seed)}"
+                    "Unweighted residual GraphSAGE on a generated random graph, "
+                    f"seed={int(seed)}"
                 ),
                 edge_csv=random_graph_dir / f"edge_weight_matrix_random_seed_{int(seed)}.csv",
                 random_seed=int(seed),
@@ -864,6 +953,7 @@ def summarize_results(
 
 def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     set_random_seed(args.seed)
+    morning_peak_hours = set(int(hour) for hour in args.morning_peak_hours)
     if args.clean_checkpoints:
         clean_checkpoint_dir(args.checkpoint_dir)
 
@@ -876,6 +966,8 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
     print("Checkpoint dir:", args.checkpoint_dir)
     print("Graph variants:", ", ".join(requested_graphs))
     print("Use graph edge weights:", bool(args.use_edge_weight))
+    print("Morning peak hours:", sorted(morning_peak_hours))
+    print("Residual training split:", args.residual_training_split)
     if rolling_od:
         print(
             "Rolling OD graph window: "
@@ -972,7 +1064,7 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
             )
             print(f"[{target_hour}] done TCN baseline", flush=True)
 
-            print(f"[{target_hour}] start confidence and split prep", flush=True)
+            print(f"[{target_hour}] start feature and split prep", flush=True)
             prior_scores = compute_prior_scores_from_zone_hourly_counts(
                 zone_hourly_counts=zone_hourly_counts,
                 target_hour=target_hour,
@@ -991,10 +1083,19 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 train_ratio=args.train_ratio,
                 val_ratio=args.val_ratio,
             )
-            history_frames = filter_history_frames_before(historical_step_frames, target_hour)
+            history_frames, history_diag = select_residual_training_history(
+                history_frames=historical_step_frames,
+                target_hour=target_hour,
+                peak_hours=morning_peak_hours,
+                split_mode=args.residual_training_split,
+            )
             print(
-                f"[{target_hour}] done confidence and split prep; "
-                f"history_snapshots={len(history_frames)}",
+                f"[{target_hour}] done feature and split prep; "
+                f"history_snapshots={history_diag['history_snapshots']} "
+                f"partition={history_diag['training_history_partition']} "
+                f"all={history_diag['all_history_snapshots']} "
+                f"peak={history_diag['peak_history_snapshots']} "
+                f"non_peak={history_diag['non_peak_history_snapshots']}",
                 flush=True,
             )
 
@@ -1032,11 +1133,14 @@ def run_experiment(args: argparse.Namespace) -> Tuple[pd.DataFrame, pd.DataFrame
                 prediction_df["window_id"] = window_idx
                 prediction_df["window_start"] = window_start
                 prediction_df["window_step"] = step
+                for column, value in history_diag.items():
+                    prediction_df[column] = value
                 hourly_record.update(
                     {
                         "window_id": window_idx,
                         "window_start": window_start,
                         "window_step": step,
+                        **history_diag,
                     }
                 )
                 detailed_frames.append(prediction_df)
