@@ -1,115 +1,119 @@
+\contentsline {chapter}{List of Figures}{v}{chapter*.2}%
+\contentsline {chapter}{List of Tables}{vi}{chapter*.3}%
+\contentsline {chapter}{Acknowledgements}{vii}{chapter*.4}%
+\contentsline {chapter}{Declaration}{viii}{chapter*.5}%
+\contentsline {chapter}{Abstract}{ix}{chapter*.6}%
+\contentsline {chapter}{List of Abbreviations}{x}{chapter*.7}%
 \contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.1}%
 \contentsline {section}{\numberline {1.1}Background and Motivation}{1}{section.1.1}%
 \contentsline {section}{\numberline {1.2}Problem Definition and Research Challenges}{2}{section.1.2}%
 \contentsline {section}{\numberline {1.3}Research Rationale and Proposed Framework}{4}{section.1.3}%
-\contentsline {section}{\numberline {1.4}Research Aim and Questions}{7}{section.1.4}%
-\contentsline {section}{\numberline {1.5}Contributions of This Thesis}{8}{section.1.5}%
-\contentsline {section}{\numberline {1.6}Thesis Structure}{9}{section.1.6}%
-\contentsline {chapter}{\numberline {2}Literature Review}{10}{chapter.2}%
-\contentsline {section}{\numberline {2.1}Introduction to the Literature Context}{10}{section.2.1}%
-\contentsline {section}{\numberline {2.2}Traditional Urban Demand Forecasting Methods}{13}{section.2.2}%
-\contentsline {section}{\numberline {2.3}Deep Temporal Sequence Models for Demand Forecasting}{15}{section.2.3}%
-\contentsline {section}{\numberline {2.4}Multi-Scale Modelling as a Distinct Research Theme}{18}{section.2.4}%
-\contentsline {section}{\numberline {2.5}Spatial Dependence Beyond Geography}{19}{section.2.5}%
-\contentsline {section}{\numberline {2.6}Graph Neural Networks for Transportation Forecasting}{21}{section.2.6}%
-\contentsline {section}{\numberline {2.7}Two-Stage Residual Refinement Versus End-to-End Spatiotemporal Learning}{23}{section.2.7}%
-\contentsline {section}{\numberline {2.8}Historical Summary Features and Lightweight Context Injection}{24}{section.2.8}%
-\contentsline {section}{\numberline {2.9}Confidence Fusion as an Emerging Research Direction}{25}{section.2.9}%
-\contentsline {section}{\numberline {2.10}Uncertainty Estimation and Robust Forecasting}{27}{section.2.10}%
-\contentsline {section}{\numberline {2.11}Rolling Forecasting, Persistent Models, and Incremental Learning}{28}{section.2.11}%
-\contentsline {section}{\numberline {2.12}Critical Gaps in the Existing Literature and Their Relevance to the Project}{31}{section.2.12}%
-\contentsline {section}{\numberline {2.13}Synthesis: Positioning the Present Study}{32}{section.2.13}%
-\contentsline {chapter}{\numberline {3}Methodology}{34}{chapter.3}%
-\contentsline {section}{\numberline {3.1}Overview}{34}{section.3.1}%
-\contentsline {section}{\numberline {3.2}Problem Setup}{35}{section.3.2}%
-\contentsline {subsection}{\numberline {3.2.1}Forecasting Objective}{35}{subsection.3.2.1}%
-\contentsline {subsection}{\numberline {3.2.2}Two-Stage Forecasting Formulation}{37}{subsection.3.2.2}%
-\contentsline {subsection}{\numberline {3.2.3}Rolling Forecasting Setting}{38}{subsection.3.2.3}%
-\contentsline {subsection}{\numberline {3.2.4}Target Variables and Evaluation Quantities}{38}{subsection.3.2.4}%
-\contentsline {section}{\numberline {3.3}Data Representation and Preprocessing}{39}{section.3.3}%
-\contentsline {subsection}{\numberline {3.3.1}Raw Data and Hourly Aggregation}{39}{subsection.3.3.1}%
-\contentsline {subsection}{\numberline {3.3.2}Zone Filtering and Data Validity}{40}{subsection.3.3.2}%
-\contentsline {subsection}{\numberline {3.3.3}Temporal Granularity and Historical Windows}{40}{subsection.3.3.3}%
-\contentsline {subsection}{\numberline {3.3.4}Construction of Dense Zone Series}{41}{subsection.3.3.4}%
-\contentsline {subsection}{\numberline {3.3.5}Scaling and Temporal Integrity}{42}{subsection.3.3.5}%
-\contentsline {subsection}{\numberline {3.3.6}Sliding-Window Sample Generation}{42}{subsection.3.3.6}%
-\contentsline {subsection}{\numberline {3.3.7}Graph Construction from Origin--Destination Flow}{43}{subsection.3.3.7}%
-\contentsline {subsection}{\numberline {3.3.8}Auxiliary Historical Features for Graph Refinement}{44}{subsection.3.3.8}%
-\contentsline {section}{\numberline {3.4}Stage One: Multi-Scale Temporal Forecasting}{44}{section.3.4}%
-\contentsline {subsection}{\numberline {3.4.1}Motivation for a Multi-Branch Design}{44}{subsection.3.4.1}%
-\contentsline {subsection}{\numberline {3.4.2}Per-Zone Temporal Modelling}{45}{subsection.3.4.2}%
-\contentsline {subsection}{\numberline {3.4.3}Branch Inputs}{46}{subsection.3.4.3}%
-\contentsline {subsection}{\numberline {3.4.4}Daily and Weekly Encoders}{46}{subsection.3.4.4}%
-\contentsline {subsection}{\numberline {3.4.5}Monthly Encoder}{47}{subsection.3.4.5}%
-\contentsline {subsection}{\numberline {3.4.6}Branch-Level Dropout and Representation Stability}{47}{subsection.3.4.6}%
-\contentsline {subsection}{\numberline {3.4.7}Fusion of Longer-Term Temporal Contexts}{48}{subsection.3.4.7}%
-\contentsline {subsection}{\numberline {3.4.8}GRU-Based Output Pathway}{48}{subsection.3.4.8}%
-\contentsline {subsection}{\numberline {3.4.9}Prediction in Original Scale}{49}{subsection.3.4.9}%
-\contentsline {subsection}{\numberline {3.4.10}Training Objective for the Temporal Stage}{49}{subsection.3.4.10}%
-\contentsline {subsection}{\numberline {3.4.11}Optimisation and Early Stopping}{50}{subsection.3.4.11}%
-\contentsline {subsection}{\numberline {3.4.12}Checkpointing and Model Persistence}{50}{subsection.3.4.12}%
-\contentsline {section}{\numberline {3.5}Uncertainty Estimation and Confidence Construction}{51}{section.3.5}%
-\contentsline {subsection}{\numberline {3.5.1}Role of Uncertainty in the Framework}{51}{subsection.3.5.1}%
-\contentsline {subsection}{\numberline {3.5.2}Monte Carlo Dropout for Predictive Uncertainty}{51}{subsection.3.5.2}%
-\contentsline {subsection}{\numberline {3.5.3}Branch-Embedding Variability}{53}{subsection.3.5.3}%
-\contentsline {subsection}{\numberline {3.5.4}Historical Prior Score}{53}{subsection.3.5.4}%
-\contentsline {subsection}{\numberline {3.5.5}Stability Score from Predictive Variance}{54}{subsection.3.5.5}%
-\contentsline {subsection}{\numberline {3.5.6}Neighbourhood Consistency Score}{54}{subsection.3.5.6}%
-\contentsline {subsection}{\numberline {3.5.7}Confidence Fusion}{55}{subsection.3.5.7}%
-\contentsline {subsection}{\numberline {3.5.8}Interpretation of Confidence}{55}{subsection.3.5.8}%
-\contentsline {section}{\numberline {3.6}Stage Two: Graph-Based Residual Refinement}{56}{section.3.6}%
-\contentsline {subsection}{\numberline {3.6.1}Motivation for Spatial Refinement}{56}{subsection.3.6.1}%
-\contentsline {subsection}{\numberline {3.6.2}Graph Construction from OD Flow Connectivity}{57}{subsection.3.6.2}%
-\contentsline {subsection}{\numberline {3.6.3}Node Features}{57}{subsection.3.6.3}%
-\contentsline {subsection}{\numberline {3.6.4}Residual Supervision}{58}{subsection.3.6.4}%
-\contentsline {subsection}{\numberline {3.6.5}GraphSAGE Architecture}{58}{subsection.3.6.5}%
-\contentsline {subsection}{\numberline {3.6.6}Confidence-Aware Loss Weighting}{59}{subsection.3.6.6}%
-\contentsline {subsection}{\numberline {3.6.7}Why Node-Weighted Rather Than Edge-Weighted?}{59}{subsection.3.6.7}%
-\contentsline {subsection}{\numberline {3.6.8}Graph Training per Rolling Step}{60}{subsection.3.6.8}%
-\contentsline {subsection}{\numberline {3.6.9}Handling Missing and Invalid Nodes}{60}{subsection.3.6.9}%
-\contentsline {section}{\numberline {3.7}Rolling Forecasting Protocol and Model Management}{61}{section.3.7}%
-\contentsline {subsection}{\numberline {3.7.1}Rolling Workflow}{61}{subsection.3.7.1}%
-\contentsline {subsection}{\numberline {3.7.2}Persistent Checkpoint Reuse}{61}{subsection.3.7.2}%
-\contentsline {subsection}{\numberline {3.7.3}Incremental Update Extension}{62}{subsection.3.7.3}%
-\contentsline {subsection}{\numberline {3.7.4}Why Rolling Evaluation Matters}{62}{subsection.3.7.4}%
-\contentsline {subsection}{\numberline {3.7.5}Temporal Integrity Under Rolling Forecasting}{63}{subsection.3.7.5}%
-\contentsline {section}{\numberline {3.8}Methodological Discussion}{63}{section.3.8}%
-\contentsline {subsection}{\numberline {3.8.1}Why the Method Uses a Two-Stage Rather Than End-to-End Design}{63}{subsection.3.8.1}%
-\contentsline {subsection}{\numberline {3.8.2}Current Limitations}{64}{subsection.3.8.2}%
-\contentsline {subsection}{\numberline {3.8.3}Summary}{65}{subsection.3.8.3}%
-\contentsline {chapter}{\numberline {4}Implementation}{66}{chapter.4}%
-\contentsline {section}{\numberline {4.1}Overview}{66}{section.4.1}%
-\contentsline {section}{\numberline {4.2}Software Structure and Module Responsibilities}{67}{section.4.2}%
-\contentsline {subsection}{\numberline {4.2.1}Top-Level Rolling Driver}{67}{subsection.4.2.1}%
-\contentsline {subsection}{\numberline {4.2.2}Temporal Model and Manager Module}{69}{subsection.4.2.2}%
-\contentsline {subsection}{\numberline {4.2.3}Graph Refinement Module}{71}{subsection.4.2.3}%
-\contentsline {section}{\numberline {4.3}Data Loading and Preprocessing Implementation}{71}{section.4.3}%
-\contentsline {section}{\numberline {4.4}Temporal Model Implementation}{73}{section.4.4}%
-\contentsline {section}{\numberline {4.5}Confidence Implementation}{75}{section.4.5}%
-\contentsline {section}{\numberline {4.6}Graph Refinement Implementation}{77}{section.4.6}%
-\contentsline {section}{\numberline {4.7}Rolling Pipeline Implementation}{79}{section.4.7}%
-\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{80}{section.4.8}%
-\contentsline {section}{\numberline {4.9}Persistent and Incremental Multi-Scale Managers}{81}{section.4.9}%
-\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{85}{section.4.10}%
-\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{86}{section.4.11}%
-\contentsline {section}{\numberline {4.12}Summary}{87}{section.4.12}%
-\contentsline {chapter}{\numberline {5}Experiments}{88}{chapter.5}%
-\contentsline {section}{\numberline {5.1}Experimental Objectives}{88}{section.5.1}%
-\contentsline {section}{\numberline {5.2}Dataset and Preprocessing}{90}{section.5.2}%
-\contentsline {section}{\numberline {5.3}Evaluation Protocol and Metrics}{93}{section.5.3}%
-\contentsline {section}{\numberline {5.4}Experiment 1: Temporal Baseline Comparison}{96}{section.5.4}%
-\contentsline {section}{\numberline {5.5}Experiment 2: Effect of Graph-based Residual Refinement}{100}{section.5.5}%
-\contentsline {section}{\numberline {5.6}Experiment 3: Confidence-weighted GNN Ablation}{104}{section.5.6}%
-\contentsline {section}{\numberline {5.7}Experiment 4: Incremental Training in Rolling Forecasting}{108}{section.5.7}%
-\contentsline {section}{\numberline {5.8}Summary of Experimental Findings}{111}{section.5.8}%
-\contentsline {chapter}{\numberline {6}Discussion}{113}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Overview of the Main Findings}{113}{section.6.1}%
-\contentsline {section}{\numberline {6.2}Interpretation of the Multi-scale Temporal Model}{115}{section.6.2}%
-\contentsline {section}{\numberline {6.3}Interpretation of Graph-based Residual Refinement}{118}{section.6.3}%
-\contentsline {section}{\numberline {6.4}Interpretation of Confidence Weighting}{120}{section.6.4}%
-\contentsline {section}{\numberline {6.5}Interpretation of Incremental Training}{123}{section.6.5}%
-\contentsline {section}{\numberline {6.6}Practical Implications}{125}{section.6.6}%
-\contentsline {section}{\numberline {6.7}Limitations}{127}{section.6.7}%
-\contentsline {section}{\numberline {6.8}Future Work}{129}{section.6.8}%
-\contentsline {section}{\numberline {6.9}Concluding Discussion}{130}{section.6.9}%
-\contentsline {chapter}{\numberline {7}Conclusion}{132}{chapter.7}%
+\contentsline {section}{\numberline {1.4}Research Aim and Questions}{6}{section.1.4}%
+\contentsline {section}{\numberline {1.5}Contributions of This Thesis}{7}{section.1.5}%
+\contentsline {section}{\numberline {1.6}Thesis Structure}{8}{section.1.6}%
+\contentsline {chapter}{\numberline {2}Literature Review}{9}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Introduction to the Literature Context}{9}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Traditional Urban Demand Forecasting Methods}{12}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Deep Temporal Sequence Models for Demand Forecasting}{14}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Multi-Scale Modelling as a Distinct Research Theme}{17}{section.2.4}%
+\contentsline {section}{\numberline {2.5}Spatial Dependence Beyond Geography}{18}{section.2.5}%
+\contentsline {section}{\numberline {2.6}Graph Neural Networks for Transportation Forecasting}{20}{section.2.6}%
+\contentsline {section}{\numberline {2.7}Two-Stage Residual Refinement Versus End-to-End Spatiotemporal Learning}{22}{section.2.7}%
+\contentsline {section}{\numberline {2.8}Historical Summary Features and Lightweight Context Injection}{23}{section.2.8}%
+\contentsline {section}{\numberline {2.9}Confidence Fusion as an Emerging Research Direction}{24}{section.2.9}%
+\contentsline {section}{\numberline {2.10}Uncertainty Estimation and Robust Forecasting}{25}{section.2.10}%
+\contentsline {section}{\numberline {2.11}Rolling Forecasting and Incremental Learning}{27}{section.2.11}%
+\contentsline {section}{\numberline {2.12}Critical Gaps in the Existing Literature and Their Relevance to the Project}{29}{section.2.12}%
+\contentsline {section}{\numberline {2.13}Synthesis: Positioning the Present Study}{30}{section.2.13}%
+\contentsline {chapter}{\numberline {3}Methodology}{32}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Overview}{32}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Problem Setup}{33}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}Forecasting Objective}{33}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}Two-Stage Forecasting Formulation}{35}{subsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.2.3}Rolling Forecasting Setting}{36}{subsection.3.2.3}%
+\contentsline {subsection}{\numberline {3.2.4}Target Variables and Evaluation Quantities}{36}{subsection.3.2.4}%
+\contentsline {section}{\numberline {3.3}Data Representation and Preprocessing}{37}{section.3.3}%
+\contentsline {subsection}{\numberline {3.3.1}Raw Data and Hourly Aggregation}{37}{subsection.3.3.1}%
+\contentsline {subsection}{\numberline {3.3.2}Zone Filtering and Data Validity}{38}{subsection.3.3.2}%
+\contentsline {subsection}{\numberline {3.3.3}Temporal Granularity and Historical Windows}{38}{subsection.3.3.3}%
+\contentsline {subsection}{\numberline {3.3.4}Construction of Dense Zone Series}{39}{subsection.3.3.4}%
+\contentsline {subsection}{\numberline {3.3.5}Scaling and Temporal Integrity}{40}{subsection.3.3.5}%
+\contentsline {subsection}{\numberline {3.3.6}Sliding-Window Sample Generation}{40}{subsection.3.3.6}%
+\contentsline {subsection}{\numberline {3.3.7}Graph Construction from Origin--Destination Flow}{41}{subsection.3.3.7}%
+\contentsline {subsection}{\numberline {3.3.8}Auxiliary Historical Features for Graph Refinement}{42}{subsection.3.3.8}%
+\contentsline {section}{\numberline {3.4}Stage One: Temporal Forecasting Candidates}{42}{section.3.4}%
+\contentsline {subsection}{\numberline {3.4.1}Motivation for a Multi-Branch Design}{42}{subsection.3.4.1}%
+\contentsline {subsection}{\numberline {3.4.2}Per-Zone Temporal Modelling}{43}{subsection.3.4.2}%
+\contentsline {subsection}{\numberline {3.4.3}Branch Inputs}{44}{subsection.3.4.3}%
+\contentsline {subsection}{\numberline {3.4.4}Daily and Weekly Encoders}{44}{subsection.3.4.4}%
+\contentsline {subsection}{\numberline {3.4.5}Monthly Encoder}{45}{subsection.3.4.5}%
+\contentsline {subsection}{\numberline {3.4.6}Branch-Level Dropout and Representation Stability}{45}{subsection.3.4.6}%
+\contentsline {subsection}{\numberline {3.4.7}Fusion of Longer-Term Temporal Contexts}{46}{subsection.3.4.7}%
+\contentsline {subsection}{\numberline {3.4.8}GRU-Based Output Pathway}{46}{subsection.3.4.8}%
+\contentsline {subsection}{\numberline {3.4.9}Prediction in Original Scale}{47}{subsection.3.4.9}%
+\contentsline {subsection}{\numberline {3.4.10}Training Objective for the Temporal Stage}{47}{subsection.3.4.10}%
+\contentsline {subsection}{\numberline {3.4.11}Optimisation and Early Stopping}{48}{subsection.3.4.11}%
+\contentsline {subsection}{\numberline {3.4.12}Checkpointing and Model Persistence}{48}{subsection.3.4.12}%
+\contentsline {section}{\numberline {3.5}Uncertainty Estimation and Confidence Construction}{49}{section.3.5}%
+\contentsline {subsection}{\numberline {3.5.1}Role of Uncertainty in the Framework}{49}{subsection.3.5.1}%
+\contentsline {subsection}{\numberline {3.5.2}Monte Carlo Dropout for Predictive Uncertainty}{49}{subsection.3.5.2}%
+\contentsline {subsection}{\numberline {3.5.3}Branch-Embedding Variability}{50}{subsection.3.5.3}%
+\contentsline {subsection}{\numberline {3.5.4}Historical Prior Score}{51}{subsection.3.5.4}%
+\contentsline {subsection}{\numberline {3.5.5}Stability Score from Predictive Variance}{51}{subsection.3.5.5}%
+\contentsline {subsection}{\numberline {3.5.6}Historical Consistency Score}{52}{subsection.3.5.6}%
+\contentsline {subsection}{\numberline {3.5.7}Confidence Fusion}{52}{subsection.3.5.7}%
+\contentsline {subsection}{\numberline {3.5.8}Interpretation of Confidence}{53}{subsection.3.5.8}%
+\contentsline {section}{\numberline {3.6}Stage Two: Graph-Based Residual Refinement}{53}{section.3.6}%
+\contentsline {subsection}{\numberline {3.6.1}Motivation for Spatial Refinement}{53}{subsection.3.6.1}%
+\contentsline {subsection}{\numberline {3.6.2}Graph Construction from OD Flow Connectivity}{54}{subsection.3.6.2}%
+\contentsline {subsection}{\numberline {3.6.3}Node Features}{54}{subsection.3.6.3}%
+\contentsline {subsection}{\numberline {3.6.4}Residual Supervision}{55}{subsection.3.6.4}%
+\contentsline {subsection}{\numberline {3.6.5}GraphSAGE Architecture}{55}{subsection.3.6.5}%
+\contentsline {subsection}{\numberline {3.6.6}Confidence-Aware Loss Weighting}{56}{subsection.3.6.6}%
+\contentsline {subsection}{\numberline {3.6.7}Confidence Weighting}{57}{subsection.3.6.7}%
+\contentsline {subsection}{\numberline {3.6.8}Graph Training per Rolling Step}{57}{subsection.3.6.8}%
+\contentsline {subsection}{\numberline {3.6.9}Handling Missing and Invalid Nodes}{57}{subsection.3.6.9}%
+\contentsline {section}{\numberline {3.7}Rolling Forecasting Protocol and Model Management}{58}{section.3.7}%
+\contentsline {subsection}{\numberline {3.7.1}Rolling Workflow}{58}{subsection.3.7.1}%
+\contentsline {subsection}{\numberline {3.7.2}Incremental Update Mechanism}{58}{subsection.3.7.2}%
+\contentsline {subsection}{\numberline {3.7.3}Why Rolling Evaluation Matters}{59}{subsection.3.7.3}%
+\contentsline {subsection}{\numberline {3.7.4}Temporal Integrity Under Rolling Forecasting}{59}{subsection.3.7.4}%
+\contentsline {section}{\numberline {3.8}Methodological Discussion}{60}{section.3.8}%
+\contentsline {subsection}{\numberline {3.8.1}Why the Method Uses a Two-Stage Rather Than End-to-End Design}{60}{subsection.3.8.1}%
+\contentsline {subsection}{\numberline {3.8.2}Current Limitations}{60}{subsection.3.8.2}%
+\contentsline {subsection}{\numberline {3.8.3}Summary}{61}{subsection.3.8.3}%
+\contentsline {chapter}{\numberline {4}Implementation}{63}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Overview}{63}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Software Structure and Module Responsibilities}{64}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Prototype Top-Level Rolling Driver}{64}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Incremental Multi-Scale Temporal Manager}{66}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Causal Graph Refinement Module}{67}{subsection.4.2.3}%
+\contentsline {section}{\numberline {4.3}Data Loading and Preprocessing Implementation}{68}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Implemented Multi-Scale Temporal Candidate}{70}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Confidence Implementation in the Causal Experiments}{72}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Causal Graph Refinement Implementation}{73}{section.4.6}%
+\contentsline {section}{\numberline {4.7}Causal Experiment Runners}{74}{section.4.7}%
+\contentsline {section}{\numberline {4.8}Checkpoint and Incremental-Update Handling}{75}{section.4.8}%
+\contentsline {section}{\numberline {4.9}Incremental Multi-Scale Manager}{76}{section.4.9}%
+\contentsline {section}{\numberline {4.10}Output Artefacts and Evaluation Files}{78}{section.4.10}%
+\contentsline {section}{\numberline {4.11}Implementation-Level Limitations}{79}{section.4.11}%
+\contentsline {section}{\numberline {4.12}Summary}{80}{section.4.12}%
+\contentsline {chapter}{\numberline {5}Experiments}{81}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Experimental Objectives}{81}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Dataset and Causal Preprocessing}{81}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Evaluation Protocol}{82}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Experiment 1: Temporal Model Comparison}{83}{section.5.4}%
+\contentsline {section}{\numberline {5.5}Experiment 2: Residual Refinement Feature Ablation}{84}{section.5.5}%
+\contentsline {section}{\numberline {5.6}Experiment 3: Graph Structure Comparison}{85}{section.5.6}%
+\contentsline {section}{\numberline {5.7}Experiment 4: Confidence-weighting Ablation}{86}{section.5.7}%
+\contentsline {section}{\numberline {5.8}Experiment 5: Confidence Weight Sensitivity}{86}{section.5.8}%
+\contentsline {section}{\numberline {5.9}Experiment 6: Reliability Analysis}{87}{section.5.9}%
+\contentsline {section}{\numberline {5.10}Summary of Experimental Findings}{87}{section.5.10}%
+\contentsline {chapter}{\numberline {6}Discussion}{89}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Main Findings}{89}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Graph Residual Refinement}{89}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Confidence as Reliability Rather Than a Main Accuracy Mechanism}{90}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Scope, Limitations, and Future Work}{90}{section.6.4}%
+\contentsline {section}{\numberline {6.5}Concluding Discussion}{91}{section.6.5}%
+\contentsline {chapter}{\numberline {7}Conclusion}{92}{chapter.7}%
+\contentsline {chapter}{Bibliography}{94}{chapter*.32}%

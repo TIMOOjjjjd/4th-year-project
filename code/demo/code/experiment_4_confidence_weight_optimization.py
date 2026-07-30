@@ -1,7 +1,7 @@
 """Experiment 4: confidence component weight optimization.
 
 This script compares three confidence-weight optimization schemes against the
-fixed 0.3/0.4/0.3 confidence used in Experiment 2.
+fixed 0.33/0.33/0.33 confidence configuration.
 
 All modes keep the same residual refinement formulation:
 
@@ -10,7 +10,7 @@ All modes keep the same residual refinement formulation:
 
 The compared confidence weight modes are:
 
-    fixed: fixed prior/stability/history-consistency weights, 0.3/0.4/0.3
+    fixed: fixed prior/stability/history-consistency weights, 0.33/0.33/0.33
     grid_search: validation-selected simplex grid weights
     random_search: validation-selected Dirichlet random weights
     learned_softmax: trainable softmax component weights
@@ -86,7 +86,7 @@ from rolling_od_graph_utils import (
 
 
 COMPONENT_NAMES = ("prior", "stability", "history_consistency")
-FIXED_WEIGHTS = np.array([0.3, 0.4, 0.3], dtype=np.float32)
+FIXED_WEIGHTS = np.array([0.33, 0.33, 0.33], dtype=np.float32)
 DEFAULT_OPT_EDGE_WEIGHT_MATRIX = BASE_DIR / "edge_weight_matrix_od.csv"
 DEFAULT_GRAPH_TYPE = "od"
 DEFAULT_RESIDUAL_WINDOW_HOURS = 168
@@ -95,7 +95,7 @@ HISTORY_CONSISTENCY_TAU = 1.0
 MODE_SPECS = {
     "fixed": {
         "model": "Fixed confidence weights",
-        "description": "fixed log-space weights 0.3/0.4/0.3",
+        "description": "fixed log-space weights 0.33/0.33/0.33",
     },
     "grid_search": {
         "model": "Grid-searched confidence weights",

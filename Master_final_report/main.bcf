@@ -2618,45 +2618,40 @@
     <bcf:citekey order="138" intorder="1">zhuang2022sparse</bcf:citekey>
     <bcf:citekey order="139" intorder="1">wang2024probgnn</bcf:citekey>
     <bcf:citekey order="139" intorder="2">gal2016dropout</bcf:citekey>
-    <bcf:citekey order="140" intorder="1">jiang2022survey</bcf:citekey>
-    <bcf:citekey order="140" intorder="2">park2022confidenceaware</bcf:citekey>
-    <bcf:citekey order="141" intorder="1">park2022confidenceaware</bcf:citekey>
-    <bcf:citekey order="141" intorder="2">wang2024gnnuncertaintysurvey</bcf:citekey>
-    <bcf:citekey order="142" intorder="1">jiang2022survey</bcf:citekey>
-    <bcf:citekey order="142" intorder="2">ke2021od</bcf:citekey>
-    <bcf:citekey order="143" intorder="1">shao2022d2stgnn</bcf:citekey>
-    <bcf:citekey order="144" intorder="1">lyu2021bigdata</bcf:citekey>
-    <bcf:citekey order="144" intorder="2">lim2021survey</bcf:citekey>
-    <bcf:citekey order="145" intorder="1">shao2022d2stgnn</bcf:citekey>
-    <bcf:citekey order="146" intorder="1">hamilton2017graphsage</bcf:citekey>
-    <bcf:citekey order="146" intorder="2">jiang2022survey</bcf:citekey>
-    <bcf:citekey order="147" intorder="1">park2022confidenceaware</bcf:citekey>
-    <bcf:citekey order="147" intorder="2">wang2024gnnuncertaintysurvey</bcf:citekey>
-    <bcf:citekey order="148" intorder="1">west2025weighted</bcf:citekey>
-    <bcf:citekey order="148" intorder="2">hu2025uncertaintygnn</bcf:citekey>
+    <bcf:citekey order="140" intorder="1">park2022confidenceaware</bcf:citekey>
+    <bcf:citekey order="140" intorder="2">wang2024gnnuncertaintysurvey</bcf:citekey>
+    <bcf:citekey order="141" intorder="1">jiang2022survey</bcf:citekey>
+    <bcf:citekey order="141" intorder="2">ke2021od</bcf:citekey>
+    <bcf:citekey order="142" intorder="1">shao2022d2stgnn</bcf:citekey>
+    <bcf:citekey order="143" intorder="1">lyu2021bigdata</bcf:citekey>
+    <bcf:citekey order="143" intorder="2">lim2021survey</bcf:citekey>
+    <bcf:citekey order="144" intorder="1">shao2022d2stgnn</bcf:citekey>
+    <bcf:citekey order="145" intorder="1">hamilton2017graphsage</bcf:citekey>
+    <bcf:citekey order="145" intorder="2">jiang2022survey</bcf:citekey>
+    <bcf:citekey order="146" intorder="1">park2022confidenceaware</bcf:citekey>
+    <bcf:citekey order="146" intorder="2">wang2024gnnuncertaintysurvey</bcf:citekey>
+    <bcf:citekey order="147" intorder="1">west2025weighted</bcf:citekey>
+    <bcf:citekey order="147" intorder="2">hu2025uncertaintygnn</bcf:citekey>
+    <bcf:citekey order="148" intorder="1">hewamalage2022pitfalls</bcf:citekey>
+    <bcf:citekey order="148" intorder="2">cerqueira2020evaluating</bcf:citekey>
     <bcf:citekey order="149" intorder="1">hewamalage2022pitfalls</bcf:citekey>
     <bcf:citekey order="149" intorder="2">cerqueira2020evaluating</bcf:citekey>
-    <bcf:citekey order="150" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="150" intorder="2">cerqueira2020evaluating</bcf:citekey>
+    <bcf:citekey order="150" intorder="1">cavalcante2024review</bcf:citekey>
     <bcf:citekey order="151" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="151" intorder="2">cavalcante2024review</bcf:citekey>
-    <bcf:citekey order="152" intorder="1">cavalcante2024review</bcf:citekey>
-    <bcf:citekey order="153" intorder="1">cavalcante2024review</bcf:citekey>
-    <bcf:citekey order="154" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="154" intorder="2">cerqueira2020evaluating</bcf:citekey>
+    <bcf:citekey order="151" intorder="2">cerqueira2020evaluating</bcf:citekey>
+    <bcf:citekey order="152" intorder="1">hewamalage2022pitfalls</bcf:citekey>
+    <bcf:citekey order="153" intorder="1">hewamalage2022pitfalls</bcf:citekey>
+    <bcf:citekey order="153" intorder="2">cerqueira2020evaluating</bcf:citekey>
+    <bcf:citekey order="154" intorder="1">garcia2023explainability</bcf:citekey>
+    <bcf:citekey order="154" intorder="2">shao2022d2stgnn</bcf:citekey>
     <bcf:citekey order="155" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="156" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="156" intorder="2">cerqueira2020evaluating</bcf:citekey>
-    <bcf:citekey order="157" intorder="1">garcia2023explainability</bcf:citekey>
-    <bcf:citekey order="157" intorder="2">shao2022d2stgnn</bcf:citekey>
-    <bcf:citekey order="158" intorder="1">hewamalage2022pitfalls</bcf:citekey>
-    <bcf:citekey order="158" intorder="2">cerqueira2020evaluating</bcf:citekey>
-    <bcf:citekey order="159" intorder="1">west2025weighted</bcf:citekey>
-    <bcf:citekey order="159" intorder="2">jiang2022survey</bcf:citekey>
-    <bcf:citekey order="160" intorder="1">lim2021survey</bcf:citekey>
-    <bcf:citekey order="160" intorder="2">zhuang2022sparse</bcf:citekey>
-    <bcf:citekey order="161" intorder="1">lyu2021bigdata</bcf:citekey>
-    <bcf:citekey order="161" intorder="2">demandfeatures2023</bcf:citekey>
+    <bcf:citekey order="155" intorder="2">cerqueira2020evaluating</bcf:citekey>
+    <bcf:citekey order="156" intorder="1">west2025weighted</bcf:citekey>
+    <bcf:citekey order="156" intorder="2">jiang2022survey</bcf:citekey>
+    <bcf:citekey order="157" intorder="1">lim2021survey</bcf:citekey>
+    <bcf:citekey order="157" intorder="2">zhuang2022sparse</bcf:citekey>
+    <bcf:citekey order="158" intorder="1">lyu2021bigdata</bcf:citekey>
+    <bcf:citekey order="158" intorder="2">demandfeatures2023</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="none">

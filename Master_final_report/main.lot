@@ -3,12 +3,12 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {5.1}{\ignorespaces Overall performance comparison of temporal-only models over the 24-hour rolling forecasting period.}}{97}{table.caption.24}%
-\contentsline {table}{\numberline {5.2}{\ignorespaces Relative improvement of the proposed multi-scale model over temporal baselines.}}{98}{table.caption.26}%
-\contentsline {table}{\numberline {5.3}{\ignorespaces Hourly MAE comparison across the 24-hour rolling forecasting period.}}{99}{table.caption.27}%
-\contentsline {table}{\numberline {5.4}{\ignorespaces Experiment 2 results: effect of graph-based residual refinement.}}{102}{table.caption.28}%
-\contentsline {table}{\numberline {5.5}{\ignorespaces Experiment 3 results: confidence-weighted GNN ablation.}}{105}{table.caption.30}%
-\contentsline {table}{\numberline {5.6}{\ignorespaces Experiment 4 results: non-incremental training vs incremental training.}}{109}{table.caption.32}%
-\contentsline {table}{\numberline {5.7}{\ignorespaces Summary of the main experimental findings.}}{112}{table.caption.34}%
+\contentsline {table}{\numberline {5.1}{\ignorespaces Causal experiment roadmap.}}{83}{table.caption.25}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Temporal-backbone comparison over twelve causal rolling windows. Lower is better.}}{84}{table.caption.26}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces Causal residual feature ablation after excluding the first prediction step of each rolling window.}}{85}{table.caption.27}%
+\contentsline {table}{\numberline {5.4}{\ignorespaces Graph structure comparison on active-refinement graph-valid predictions. OD graphs are causal. Following the conference reporting convention, MAE improvement is calculated against the Experiment~2 first-step-excluded temporal baseline (MAE 19.87), rather than a scope-matched Experiment~3 baseline.}}{85}{table.caption.28}%
+\contentsline {table}{\numberline {5.5}{\ignorespaces Ablation of confidence weighting strategies after excluding the first prediction step of each rolling window.}}{86}{table.caption.29}%
+\contentsline {table}{\numberline {5.6}{\ignorespaces Sensitivity of confidence component weights after excluding the first prediction step of each rolling window.}}{87}{table.caption.30}%
+\contentsline {table}{\numberline {5.7}{\ignorespaces Confidence-grouped reliability analysis on all E6 test predictions.}}{87}{table.caption.31}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
